@@ -162,7 +162,7 @@ async function downloadFile(path, filename) {
 $("download-csv").onclick = () => action($("download-csv"), () => downloadFile(`/api/activities/${activityId}/csv`, "課堂搶答結果.csv"));
 $("settings-form").onsubmit = event => {
   event.preventDefault(); action(event.submitter, async () => {
-    await api(`/api/activities/${activityId}/settings`, {mode:$("quiz-mode").value, fairness:$("quiz-fairness").checked});
+    await api(`/api/activities/${activityId}/settings`, {mode:$("quiz-mode").value, fairness:$("quiz-fairness").checked, duration_seconds:Number($('quiz-duration').value)});
     notice("活動規則已儲存。", true); await refresh();
   });
 };
@@ -368,8 +368,11 @@ function renderState(state) {
   if ($("settings-form").dataset.activity !== state.id) {
     $("settings-form").dataset.activity = state.id;
     $("quiz-mode").value = state.settings.mode; $("quiz-fairness").checked = !!state.settings.fairness;
+    $('quiz-duration').value=state.settings.duration_seconds;
   }
   const sequential = state.settings.mode === "sequential";
+  $('countdown').hidden=state.round.deadline===null || state.phase!=='active';
+  $('countdown').textContent=`剩餘 ${Math.max(0,Math.ceil(state.round.deadline-state.server_time))} 秒 · 到期自動${sequential?'關閉本題':'公布結果'}`;
   $("round-controls").hidden = !teacher || !sequential || state.phase !== "active";
   $("close-round").hidden = !state.round.round_open;
   $("next-round").hidden = !!state.round.round_open;

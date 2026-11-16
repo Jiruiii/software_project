@@ -192,7 +192,15 @@ async (page) => {
   stage='line 98';
   await student.screenshot({path:'output/playwright/extras-grouped-student.png',fullPage:true});
   stage='line 99';
+  await page.locator('#back').click(); await page.locator('#activity-title').fill('倒數驗收');
+  await page.locator('#question-numbers').fill('1'); await page.locator('#create-form button').click();
+  await page.locator('#session-title').filter({hasText:'倒數驗收'}).waitFor({state:'visible'});
+  await page.locator('#quiz-duration').fill('2'); await page.locator('#settings-form button').click();
+  await page.locator('#notice').filter({hasText:'活動規則已儲存'}).waitFor();
+  await page.locator('#start').click(); await page.locator('#countdown').waitFor({state:'visible'});
+  await page.locator('#results').waitFor({state:'visible'});
+  check(await page.locator('#countdown').isHidden(),'countdown still active after expiry');
   check(!errors.length,errors.join('\n')); await student.close();
-  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05','E-06','E-07','E-08','E-09','E-10'],pageErrors:errors};
+  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05','E-06','E-07','E-08','E-09','E-10','E-11'],pageErrors:errors};
   } catch (error) {throw new Error(stage+': '+error.message);}
 }

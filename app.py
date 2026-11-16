@@ -125,7 +125,7 @@ def make_server(service, port=8000, sheets=None):
                 if self.command == "POST" and action == "review":
                     return self.respond(200, service.review(token, aid, data.get("answer_id"), data.get("verdict")))
                 if self.command == "POST" and action == "settings":
-                    return self.respond(200, service.configure(token, aid, data.get("mode"), data.get("fairness", False)))
+                    return self.respond(200, service.configure(token, aid, data.get("mode"), data.get("fairness", False), data.get("duration_seconds", 0)))
                 if self.command == "POST" and action == "round":
                     return self.respond(200, service.round_action(token, aid, data.get("action")))
                 if self.command == "GET" and action == "csv":
@@ -154,7 +154,10 @@ def make_server(service, port=8000, sheets=None):
         do_GET = handle_request
         do_POST = handle_request
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    class TimedServer(ThreadingHTTPServer):
+        def service_actions(self):
+            service.tick()
+    return TimedServer(("127.0.0.1", port), Handler)
 
 
 def main():

@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from quiz_extras import ExtraFeatures
+from quiz_extras import ExtraFeatures, expire_first
 
 
 class QuizError(Exception):
@@ -182,6 +182,7 @@ class QuizService(ExtraFeatures):
                                 (gid, activity["id"], group, group.casefold()))
             return self._token("student", activity["id"], gid)
 
+    @expire_first
     def activities(self, token):
         with self.lock:
             self._auth(token, "teacher")
@@ -193,6 +194,7 @@ class QuizService(ExtraFeatures):
             raise QuizError(404, "找不到這個活動。")
         return row
 
+    @expire_first
     def transition(self, token, aid, target):
         with self.lock, self.db:
             self._auth(token, "teacher")
@@ -210,6 +212,9 @@ class QuizService(ExtraFeatures):
             if self._options(aid)["mode"] == "sequential":
                 if target == "active": self._open_round(aid, 0)
                 else: self._close_round(aid)
+            else:
+                duration=self._options(aid)['duration_seconds']
+                self.db.execute('UPDATE activity_options SET deadline=? WHERE activity_id=?', (time.time()+duration if target=='active' and duration else None,aid))
             return {"phase": target}
 
     @staticmethod
@@ -217,6 +222,7 @@ class QuizService(ExtraFeatures):
         # Do not expose the global id: gaps would reveal other groups' submissions.
         return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "stake", "verdict")}
 
+    @expire_first
     def submit(self, token, aid, question, answer, stake=1, *, _bundle=False, _commit=True, _received=None):
         from contextlib import nullcontext
         with self.lock, self.db if _commit else nullcontext():
@@ -227,7 +233,8 @@ class QuizService(ExtraFeatures):
             question, answer = text(question, "題號", 40), text(answer, "答案", 2000)
             if type(stake) is not int or not 1 <= stake <= 3:
                 raise QuizError(400, "下注必須是 1～3 的整數。")
-            self._submission_gate(activity, session, question)
+            received = time.time() if _received is None else _received
+            self._submission_gate(activity, session, question, received)
             if not _bundle and any(question in qs and len(qs)>1 for qs in self._units(aid).values()):
                 raise QuizError(409, "題組必須一次送出全部子題。")
             if not self.db.execute("SELECT 1 FROM questions WHERE activity_id=? AND id=?",
@@ -239,12 +246,12 @@ class QuizService(ExtraFeatures):
                 if previous["text"] != answer or previous["stake"] != stake:
                     raise QuizError(409, "本組已送出此題，不能修改答案。")
                 return self._own_answer(previous)
-            received = time.time() if _received is None else _received
             elapsed = max(0, round((received - activity["started_at"]) * 1000))
             cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,stake) VALUES(?,?,?,?,?,?,?)",
                                      (aid, question, session["group_id"], answer, received, elapsed, stake))
             return self._own_answer(self.db.execute("SELECT * FROM answers WHERE id=?", (cursor.lastrowid,)).fetchone())
 
+    @expire_first
     def snapshot(self, token, aid):
         with self.lock:
             session = self._auth(token, activity_id=aid)

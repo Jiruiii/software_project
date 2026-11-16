@@ -4,6 +4,7 @@ import unittest
 import threading
 import tempfile
 import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
@@ -199,6 +200,43 @@ class ExtraTests(unittest.TestCase):
         self.assertEqual([1,1,3],[r['rank'] for r in state['scoreboard']])
         self.s.review(self.t,self.aid,ids[0],'incorrect'); self.s.review(self.t,self.aid,ids[0],'incorrect')
         self.assertEqual([3,0,-3],[r['score'] for r in self.s.snapshot(self.u,self.aid)['scoreboard']])
+
+    def test_e11_deadline_boundary_and_sequential_expiry(self):
+        for invalid in (-1,3601,True,1.5,'3',None):
+            with self.assertRaises(QuizError): self.s.configure(self.t,self.aid,'all',False,invalid)
+        self.s.configure(self.t,self.aid,'all',False,10)
+        with patch('quiz_extras.time.time',return_value=100): self.s.transition(self.t,self.aid,'active')
+        with patch('quiz_extras.time.time',return_value=109.999): self.s.submit(self.u,self.aid,'1','before')
+        with patch('quiz_extras.time.time',return_value=110):
+            with self.assertRaises(QuizError): self.s.submit(self.v,self.aid,'1','late')
+            self.assertEqual('results',self.s._activity(self.aid)['phase'])
+            self.assertEqual(1,len(self.s.snapshot(self.t,self.aid)['answers']))
+        a=self.s.create(self.t,'timed rounds',['1','2'])
+        self.s.configure(self.t,a['id'],'sequential',False,5)
+        with patch('quiz_extras.time.time',return_value=200): self.s.transition(self.t,a['id'],'active')
+        with patch('quiz_extras.time.time',return_value=205):
+            state=self.s.snapshot(self.t,a['id']); self.assertEqual('active',state['phase']); self.assertFalse(state['round']['round_open'])
+            self.s.round_action(self.t,a['id'],'next')
+        with patch('quiz_extras.time.time',return_value=210):
+            self.s.tick(); self.assertEqual('results',self.s._activity(a['id'])['phase'])
+
+    def test_e11_background_without_browser_and_restart(self):
+        self.s.configure(self.t,self.aid,'all',False,1)
+        self.s.transition(self.t,self.aid,'active')
+        server=make_server(self.s,0); thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
+        try:
+            time.sleep(1.7)
+            with self.s.lock: self.assertEqual('results',self.s._activity(self.aid)['phase'])
+        finally: server.shutdown(); thread.join(); server.server_close()
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'restart.sqlite3'; s=QuizService(path,'password')
+            t=s.login('password')['token']; a=s.create(t,'restart',['1']); s.configure(t,a['id'],'all',False,10)
+            with patch('quiz_extras.time.time',return_value=100): s.transition(t,a['id'],'active')
+            s.close(); s=QuizService(path,'password')
+            try:
+                self.assertEqual(110,s._options(a['id'])['deadline'])
+                with patch('quiz_extras.time.time',return_value=111): self.assertEqual('results',s.snapshot(t,a['id'])['phase'])
+            finally: s.close()
 
     def test_e02_existing_database_migration(self):
         with tempfile.TemporaryDirectory() as folder:

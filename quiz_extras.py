@@ -6,6 +6,17 @@ import json
 import time
 import unicodedata
 from difflib import SequenceMatcher
+from functools import wraps
+
+
+def expire_first(method):
+    """Finish expiry in its own transaction before a request can fail/roll back."""
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self.lock:
+            if not self.db.in_transaction: self.tick()
+            return method(self, *args, **kwargs)
+    return call
 
 
 def csv_bytes(rows):
@@ -19,6 +30,15 @@ def csv_bytes(rows):
 
 
 class ExtraFeatures:
+    def tick(self):
+        with self.lock, self.db:
+            due=list(self.db.execute("SELECT a.id,o.mode FROM activities a JOIN activity_options o ON a.id=o.activity_id WHERE a.phase='active' AND o.deadline IS NOT NULL AND o.deadline<=?", (time.time(),)))
+            for row in due:
+                if row['mode']=='sequential': self._close_round(row['id'])
+                else:
+                    self.db.execute("UPDATE activities SET phase='results',ended_at=(SELECT deadline FROM activity_options WHERE activity_id=?) WHERE id=?", (row['id'],row['id']))
+                    self.db.execute('UPDATE activity_options SET deadline=NULL WHERE activity_id=?', (row['id'],))
+
     def _scoreboard(self, aid):
         units = self._units(aid)
         answers = {}
@@ -36,6 +56,7 @@ class ExtraFeatures:
             last_score=row['score']; row['rank']=rank
         return scores
 
+    @expire_first
     def submit_unit(self, token, aid, unit, answers, stake=1):
         from quiz_service import QuizError, text
         with self.lock, self.db:
@@ -165,6 +186,7 @@ class ExtraFeatures:
         units = list(self._units(activity["id"]).values())
         return any(question in qs and (i < options["round_index"] or (i == options["round_index"] and not options["round_open"])) for i, qs in enumerate(units))
 
+    @expire_first
     def review(self, token, aid, answer_id, verdict):
         from quiz_service import QuizError
         with self.lock, self.db:
@@ -194,7 +216,7 @@ class ExtraFeatures:
             units.setdefault(row["unit_id"], []).append(row["id"])
         return units
 
-    def configure(self, token, aid, mode, fairness=False):
+    def configure(self, token, aid, mode, fairness=False, duration_seconds=0):
         from quiz_service import QuizError
         with self.lock, self.db:
             self._auth(token, "teacher")
@@ -204,7 +226,9 @@ class ExtraFeatures:
                 raise QuizError(400, "請選擇有效的搶答模式與保底開關。")
             if fairness and mode != "sequential":
                 raise QuizError(400, "保底只適用逐題模式。")
-            self.db.execute("UPDATE activity_options SET mode=?,fairness=? WHERE activity_id=?", (mode, int(fairness), aid))
+            if type(duration_seconds) is not int or not 0 <= duration_seconds <= 3600:
+                raise QuizError(400, "倒數必須是 0～3600 的整數秒；0 表示不限時。")
+            self.db.execute("UPDATE activity_options SET mode=?,fairness=?,duration_seconds=? WHERE activity_id=?", (mode, int(fairness), duration_seconds, aid))
             return {"ok": True}
 
     def _open_round(self, aid, index):
@@ -220,6 +244,7 @@ class ExtraFeatures:
         now = time.time()
         self.db.execute("UPDATE activity_options SET round_index=?,round_open=1,round_started_at=?,priority_until=?,eligible_json=?,participants_json=? WHERE activity_id=?",
                         (index, now, now+3 if eligible else 0, json.dumps(eligible), json.dumps(participants), aid))
+        self.db.execute('UPDATE activity_options SET deadline=? WHERE activity_id=?', (now+options['duration_seconds'] if options['duration_seconds'] else None,aid))
 
     def _close_round(self, aid):
         options = self._options(aid)
@@ -232,10 +257,11 @@ class ExtraFeatures:
         for gid in json.loads(options["participants_json"]):
             self.db.execute("INSERT OR IGNORE INTO group_progress(group_id) VALUES(?)", (gid,))
             self.db.execute("UPDATE group_progress SET misses=CASE WHEN ? THEN 0 ELSE misses+1 END WHERE group_id=?", (gid == winner, gid))
-        self.db.execute("UPDATE activity_options SET round_open=0 WHERE activity_id=?", (aid,))
+        self.db.execute("UPDATE activity_options SET round_open=0,deadline=NULL WHERE activity_id=?", (aid,))
         if options["round_index"] == len(units)-1:
             self.db.execute("UPDATE activities SET phase='results',ended_at=? WHERE id=?", (time.time(), aid))
 
+    @expire_first
     def round_action(self, token, aid, action):
         from quiz_service import QuizError
         with self.lock, self.db:
@@ -251,15 +277,18 @@ class ExtraFeatures:
                 raise QuizError(409, "請先關閉當題，再開下一題。")
             return {"ok": True}
 
-    def _submission_gate(self, activity, session, question):
+    def _submission_gate(self, activity, session, question, received=None):
         from quiz_service import QuizError
         options = self._options(activity["id"])
+        now = time.time() if received is None else received
+        if options['deadline'] is not None and now >= options['deadline']:
+            raise QuizError(409, "作答時間已到，答案未送出。")
         if options["mode"] != "sequential":
             return
         units = list(self._units(activity["id"]).values())
         if not options["round_open"] or options["round_index"] < 0 or question not in units[options["round_index"]]:
             raise QuizError(409, "這一題尚未開放或已關閉。")
-        if time.time() < options["priority_until"] and session["group_id"] not in json.loads(options["eligible_json"]):
+        if now < options["priority_until"] and session["group_id"] not in json.loads(options["eligible_json"]):
             raise QuizError(409, "目前是保底先答時間，請等待倒數結束。")
 
     def _extra_snapshot(self, state, session):

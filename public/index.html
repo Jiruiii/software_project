@@ -87,10 +87,12 @@
           <div class="live-heading"><h2 id="content-title">準備作答</h2><span id="phase-label" class="phase-pill"></span></div>
           <p id="phase-help" class="muted"></p>
           <p id="round-status" class="integration-note" hidden></p>
+          <p id="countdown" class="integration-note" hidden></p>
           <form id="settings-form" class="panel" hidden>
             <h3>活動規則</h3><label for="quiz-mode">開放方式</label>
             <select id="quiz-mode"><option value="all">全題同時開放</option><option value="sequential">逐題搶答</option></select>
             <label class="check-label"><input id="quiz-fairness" type="checkbox">啟用保底：連續 3 題未成功，下一題先答 3 秒</label>
+            <label for="quiz-duration">作答秒數（0 不限時；逐題模式為每題秒數，含保底時間）</label><input id="quiz-duration" type="number" min="0" max="3600" step="1" value="0" required>
             <button class="primary" type="submit">儲存活動規則</button>
           </form>
           <div id="results" hidden></div>
