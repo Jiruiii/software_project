@@ -26,11 +26,13 @@ def make_server(service, port=8000, sheets=None):
             # Avoid logging request payloads, tokens or arbitrary URL contents.
             pass
 
-        def respond(self, status, payload, mime="application/json; charset=utf-8"):
+        def respond(self, status, payload, mime="application/json; charset=utf-8", filename=None):
             body = json.dumps(payload, ensure_ascii=False).encode() if not isinstance(payload, bytes) else payload
             self.send_response(status)
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(body)))
+            if filename:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
@@ -109,9 +111,11 @@ def make_server(service, port=8000, sheets=None):
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
                     return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export))?", path)
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv))?", path)
             if match:
                 aid, action = match.groups()
+                if self.command == "GET" and action == "csv":
+                    return self.respond(200, service.activity_csv(token, aid), "text/csv; charset=utf-8", "classroom-results.csv")
                 if self.command == "GET" and action is None:
                     return self.respond(200, service.snapshot(token, aid))
                 if self.command == "POST" and action in ("start", "end"):

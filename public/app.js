@@ -151,6 +151,13 @@ for (const kind of ["start", "end"]) $(kind).onclick = () => action($(kind), asy
 });
 
 function timeText(seconds) { return new Date(seconds * 1000).toLocaleTimeString("zh-TW", {hour12:false}); }
+async function downloadFile(path, filename) {
+  const response = await fetch(path, {headers:{Authorization:`Bearer ${auth.token}`}});
+  if (!response.ok) throw new Error((await response.json()).error || "下載失敗。");
+  const url = URL.createObjectURL(await response.blob()), link = el("a");
+  link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$("download-csv").onclick = () => action($("download-csv"), () => downloadFile(`/api/activities/${activityId}/csv`, "課堂搶答結果.csv"));
 function renderList(items) {
   const key = JSON.stringify(items); if (lastList === key) return; lastList = key;
   $("activity-count").textContent = items.length;
@@ -262,6 +269,7 @@ function renderState(state) {
   $("student-questions").hidden = teacher || ended;
   $("teacher-monitor").hidden = !teacher;
   $("results").hidden = !ended;
+  $("download-csv").hidden = !teacher || !ended;
   $("sheet-export-controls").hidden = !teacher || !state.source;
   if (teacher && state.source) {
     $("source-name").textContent = `來源：${state.source.sheet_title}` + (state.source.exported_at ? " · 已核對寫回" : "");

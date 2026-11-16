@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from quiz_extras import ExtraFeatures
 
 
 class QuizError(Exception):
@@ -21,7 +22,7 @@ def text(value, name, limit):
     return value.strip()
 
 
-class QuizService:
+class QuizService(ExtraFeatures):
     def __init__(self, database, teacher_password):
         if not teacher_password:
             raise ValueError("教師密碼不可空白")
