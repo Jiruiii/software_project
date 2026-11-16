@@ -57,6 +57,18 @@ class SheetsWorkflowTests(unittest.TestCase):
         self.service.transition(self.teacher,a["id"],"results")
         return a,student
 
+    def test_regrade_exports_current_winner_and_restores_original(self):
+        a, student = self.ended()
+        aid = a['id']; self.flow.export(self.teacher, aid)
+        answer = self.service.snapshot(self.teacher, aid)['answers'][0]
+        self.service.review(self.teacher, aid, answer['id'], 'incorrect')
+        self.assertTrue(self.service.snapshot(self.teacher, aid)['source']['export_stale'])
+        self.flow.export(self.teacher, aid)
+        self.assertEqual('', from_google(self.google.data)[0].value(4,6))
+        self.service.review(self.teacher, aid, answer['id'], 'correct')
+        self.flow.export(self.teacher, aid)
+        self.assertEqual('=SUM(A1:A2)', from_google(self.google.data)[0].value(4,6))
+
     def test_preview_import_privacy_and_atomic_failure(self):
         preview=self.flow.preview(self.teacher,COPY_URL)
         self.assertEqual(6,preview["count"])

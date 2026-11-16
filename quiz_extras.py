@@ -40,7 +40,47 @@ class ExtraFeatures:
         columns = {r["name"] for r in self.db.execute("PRAGMA table_info(answers)")}
         if "stake" not in columns:
             self.db.execute("ALTER TABLE answers ADD COLUMN stake INTEGER NOT NULL DEFAULT 1")
+        if "verdict" not in columns:
+            self.db.execute("ALTER TABLE answers ADD COLUMN verdict TEXT NOT NULL DEFAULT 'pending'")
         self.db.commit()
+
+    def _winner_rows(self, aid):
+        """Earliest complete unit not disqualified; one group wins every child."""
+        rows = [dict(r) for r in self.db.execute("SELECT a.*,g.name AS group_name FROM answers a JOIN groups g ON g.id=a.group_id WHERE a.activity_id=? ORDER BY a.id", (aid,))]
+        winners = {}
+        for questions in self._units(aid).values():
+            candidates = {}
+            for row in rows:
+                if row["question_id"] in questions:
+                    candidates.setdefault(row["group_id"], []).append(row)
+            for answers in candidates.values():
+                if len(answers) == len(questions) and all(a["verdict"] != "incorrect" for a in answers):
+                    winners.update({a["question_id"]: a for a in answers})
+                    break
+        return winners
+
+    def _reviewable(self, activity, question):
+        if activity["phase"] == "results": return True
+        options = self._options(activity["id"])
+        if activity["phase"] != "active" or options["mode"] != "sequential": return False
+        units = list(self._units(activity["id"]).values())
+        return any(question in qs and (i < options["round_index"] or (i == options["round_index"] and not options["round_open"])) for i, qs in enumerate(units))
+
+    def review(self, token, aid, answer_id, verdict):
+        from quiz_service import QuizError
+        with self.lock, self.db:
+            self._auth(token, "teacher")
+            activity = self._activity(aid)
+            if type(answer_id) is not int or verdict not in ("pending", "correct", "incorrect"):
+                raise QuizError(400, "請提供有效答案與判定。")
+            answer = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND id=?", (aid, answer_id)).fetchone()
+            if not answer: raise QuizError(404, "找不到這筆答案。")
+            if not self._reviewable(activity, answer["question_id"]):
+                raise QuizError(409, "請先關閉此題或結束活動，再判定答案。")
+            if answer["verdict"] != verdict:
+                self.db.execute("UPDATE answers SET verdict=? WHERE id=?", (verdict, answer_id))
+                self.db.execute("UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?", (aid,))
+            return {"ok": True}
 
     def _new_options(self, aid):
         self.db.execute("INSERT INTO activity_options(activity_id) VALUES(?)", (aid,))
@@ -88,7 +128,7 @@ class ExtraFeatures:
             return
         units = list(self._units(aid).values())
         questions = units[options["round_index"]]
-        first = self.db.execute("SELECT group_id FROM answers WHERE activity_id=? AND question_id=? ORDER BY id LIMIT 1", (aid, questions[0])).fetchone()
+        first = self._winner_rows(aid).get(questions[0])
         winner = first["group_id"] if first else None
         for gid in json.loads(options["participants_json"]):
             self.db.execute("INSERT OR IGNORE INTO group_progress(group_id) VALUES(?)", (gid,))
@@ -138,6 +178,8 @@ class ExtraFeatures:
             if time.time() < options["priority_until"] and not state["round"]["own_priority"] and session["role"] == "student":
                 available = []
         state["available_questions"] = available
+        if session["role"] == "teacher":
+            state["reviewable_questions"] = [q for q in state["questions"] if self._reviewable(state, q)]
         return state
 
     def activity_csv(self, token, aid):

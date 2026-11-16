@@ -216,6 +216,9 @@ def prepare_export(source, grid, winners):
         q, row, col = target["question"], target["row"], target["col"]
         value = grid.cells.get((row,col), "")
         winner = winners.get(q)
+        # Restore only our own previous export when its winner is disqualified.
+        if winner is None and q in source.get("last_export", {}):
+            winner = target["original"]
         previous = source.get("last_export", {}).get(q, target["original"])
         if value != previous and (winner is None or value != winner):
             raise QuizError(409, f"{target['cell']} 已被修改，已停止寫回以保留原內容。")

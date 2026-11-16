@@ -99,6 +99,26 @@ class ExtraTests(unittest.TestCase):
         with self.assertRaises(QuizError): self.s.submit(self.u, self.aid, "1", "answer", 2)
         self.assertEqual(1, self.s.submit(self.v, self.aid, "1", "default")["stake"])
 
+    def test_e05_review_replacement_reversal_and_permissions(self):
+        self.s.transition(self.t, self.aid, "active")
+        first = self.s.submit(self.u, self.aid, "1", "first", 3)
+        self.s.submit(self.v, self.aid, "1", "second", 2)
+        ids = [a["id"] for a in self.s.snapshot(self.t, self.aid)["answers"]]
+        with self.assertRaises(QuizError): self.s.review(self.t, self.aid, ids[0], "incorrect")
+        self.s.transition(self.t, self.aid, "results")
+        with self.assertRaises(QuizError): self.s.review(self.u, self.aid, ids[0], "incorrect")
+        with self.assertRaises(QuizError): self.s.review(self.t, self.aid, ids[0], "invalid")
+        self.s.review(self.t, self.aid, ids[0], "incorrect")
+        self.assertEqual("B", self.s.snapshot(self.u, self.aid)["results"][0]["winner"]["group_name"])
+        self.s.review(self.t, self.aid, ids[1], "incorrect")
+        self.assertIsNone(self.s.snapshot(self.u, self.aid)["results"][0]["winner"])
+        for verdict in ("correct", "correct", "pending"):
+            self.s.review(self.t, self.aid, ids[0], verdict)
+            winner = self.s.snapshot(self.u, self.aid)["results"][0]["winner"]
+            self.assertEqual("A", winner["group_name"])
+            self.assertEqual(first["received_at"], winner["received_at"])
+            self.assertEqual("first", winner["text"])
+
     def test_e02_existing_database_migration(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/"old.sqlite3"

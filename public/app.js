@@ -1,6 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const phaseNames = {preparing: "準備中", active: "作答中", results: "結果"};
+const verdictNames = {pending:"未判定", correct:"正確", incorrect:"錯誤"};
 let auth = null, activityId = null, current = null, generation = 0;
 let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", lastResults = "", lastList = "";
 const pendingAnswers = new Set();
@@ -229,7 +230,7 @@ function updateInputs() {
   }
 }
 function renderMonitor(state) {
-  const key = JSON.stringify([state.groups, state.answers, state.questions]);
+  const key = JSON.stringify([state.groups, state.answers, state.questions, state.reviewable_questions]);
   if (lastMonitor === key) return; lastMonitor = key;
   $("monitor-summary").textContent = `${state.groups.length} 個小組已加入 · ${state.questions.length} 題 · 已收到 ${state.answers.length} 份答案`;
   const wrap = $("monitor-table"); wrap.replaceChildren();
@@ -242,7 +243,20 @@ function renderMonitor(state) {
     const row = el("tr"); row.append(el("th", group.name));
     for (const q of state.questions) {
       const cell = el("td"), answer = lookup.get(JSON.stringify([group.id,q]));
-      if (answer) cell.append(el("span", answer.text, "cell-answer"), el("small", `${timeText(answer.received_at)} · ${(answer.elapsed_ms / 1000).toFixed(3)} 秒`));
+      if (answer) {
+        cell.append(el("span", answer.text, "cell-answer"), el("small", `${timeText(answer.received_at)} · ${(answer.elapsed_ms / 1000).toFixed(3)} 秒 · 下注 ${answer.stake} · ${verdictNames[answer.verdict]}`));
+        if (state.reviewable_questions.includes(q)) {
+          const controls = el("div", undefined, "review-controls");
+          for (const verdict of ['correct','incorrect','pending']) {
+            const button = el('button', verdictNames[verdict], 'text-button'); button.dataset.verdict = verdict;
+            button.setAttribute('aria-label', `${group.name} 第 ${q} 題判為${verdictNames[verdict]}`);
+            button.disabled = answer.verdict === verdict;
+            button.onclick = () => action(button, async () => {await api(`/api/activities/${state.id}/review`, {answer_id:answer.id, verdict}); await refresh();});
+            controls.append(button);
+          }
+          cell.append(controls);
+        }
+      }
       else cell.append(el("span", "尚未送出", "unsent"));
       row.append(cell);
     }
@@ -256,7 +270,7 @@ function renderResults(state) {
   for (const result of state.results) {
     const row = el("div", undefined, "result-row"), detail = el("div");
     row.append(el("span", `第 ${result.question_id} 題`, "result-number"));
-    detail.append(el("div", result.winner ? `${result.winner.group_name} · 搶答成功` : "無人作答", "winner"));
+    detail.append(el("div", result.winner ? `${result.winner.group_name} · 搶答成功（${verdictNames[result.winner.verdict]}）` : "無成功組別", "winner"));
     if (result.winner) detail.append(el("p", result.winner.text, "result-answer"));
     row.append(detail); list.append(row);
   }
@@ -343,7 +357,7 @@ function renderState(state) {
     (priorityLeft && !ended ? ` · 保底先答剩 ${priorityLeft} 秒${state.round.own_priority ? "（本組可先答）" : ""}` : "");
   $("sheet-export-controls").hidden = !teacher || !state.source;
   if (teacher && state.source) {
-    $("source-name").textContent = `來源：${state.source.sheet_title}` + (state.source.exported_at ? " · 已核對寫回" : "");
+    $("source-name").textContent = `來源：${state.source.sheet_title}` + (state.source.export_stale ? " · 判定已變更，請重新寫回" : state.source.exported_at ? " · 已核對寫回" : "");
     $("source-link").href = state.source.url;
     $("sheet-export").hidden = !ended;
   }

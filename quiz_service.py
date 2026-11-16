@@ -92,9 +92,7 @@ class QuizService(ExtraFeatures):
             row = self.db.execute("SELECT source_json FROM sheet_sources WHERE activity_id=?",(aid,)).fetchone()
             if not row:
                 raise QuizError(409, "這是手動題號活動，沒有可寫回的 Google Sheet。")
-            winners = {}
-            for answer in self.db.execute("SELECT question_id,text FROM answers WHERE activity_id=? ORDER BY id",(aid,)):
-                winners.setdefault(answer["question_id"],answer["text"])
+            winners = {q: a["text"] for q, a in self._winner_rows(aid).items()}
             return json.loads(row["source_json"]), winners
 
     def record_export(self, token, aid, expected, sheet_id):
@@ -215,7 +213,7 @@ class QuizService(ExtraFeatures):
     @staticmethod
     def _own_answer(row):
         # Do not expose the global id: gaps would reveal other groups' submissions.
-        return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "stake")}
+        return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "stake", "verdict")}
 
     def submit(self, token, aid, question, answer, stake=1):
         with self.lock, self.db:
@@ -254,7 +252,7 @@ class QuizService(ExtraFeatures):
                 if source:
                     info = json.loads(source["source_json"])
                     activity["source"] = {"sheet_title":info["sheet_title"], "url":f"https://docs.google.com/spreadsheets/d/{info['spreadsheet_id']}/edit",
-                                          "exported_at":source["exported_at"]}
+                                          "exported_at":source["exported_at"], "export_stale":bool(info.get("last_export")) and not source["exported_at"]}
                 activity["groups"] = [dict(r) for r in self.db.execute(
                     "SELECT id,name FROM groups WHERE activity_id=? ORDER BY name", (aid,))]
                 activity["answers"] = [dict(r) for r in self.db.execute(
@@ -266,8 +264,7 @@ class QuizService(ExtraFeatures):
                     "SELECT * FROM answers WHERE activity_id=? AND group_id=? ORDER BY id", (aid, session["group_id"]))]
             if activity["phase"] == "results":
                 winners = {}
-                for r in self.db.execute(
-                    "SELECT a.*,g.name AS group_name FROM answers a JOIN groups g ON a.group_id=g.id WHERE a.activity_id=? ORDER BY a.id", (aid,)):
+                for r in self._winner_rows(aid).values():
                     winners.setdefault(r["question_id"], {**self._own_answer(r), "group_name": r["group_name"]})
                 activity["results"] = [{"question_id": q, "winner": winners.get(q)} for q in activity["questions"]]
             return self._extra_snapshot(activity, session)

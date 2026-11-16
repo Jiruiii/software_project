@@ -46,10 +46,14 @@ async (page) => {
   await page.locator('#replay-question').selectOption('2'); await page.locator('#replay-reset').click();
   await page.waitForFunction(()=>document.querySelector('#replay-status').textContent.includes('無成功組別'));
   check(before===await page.evaluate(()=>JSON.stringify(current.answers)),'replay changed records');
+  await page.getByRole('button',{name:'驗收A組 第 1 題判為錯誤',exact:true}).click();
+  await student.waitForFunction(()=>!document.querySelector('#results').textContent.includes('搶答成功'));
+  await page.getByRole('button',{name:'驗收A組 第 1 題判為正確',exact:true}).click();
+  await student.waitForFunction(()=>document.querySelector('#results').textContent.includes('搶答成功（正確）'));
   await page.screenshot({path:'output/playwright/extras-teacher.png',fullPage:true});
   await student.setViewportSize({width:390,height:844});
   check(await student.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile overflow');
   await student.screenshot({path:'output/playwright/extras-student.png',fullPage:true});
   check(!errors.length,errors.join('\n')); await student.close();
-  return {passed:true,features:['E-01','E-02','E-03','E-04'],pageErrors:errors};
+  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05'],pageErrors:errors};
 }
