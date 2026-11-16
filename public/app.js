@@ -158,6 +158,16 @@ async function downloadFile(path, filename) {
   link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 $("download-csv").onclick = () => action($("download-csv"), () => downloadFile(`/api/activities/${activityId}/csv`, "課堂搶答結果.csv"));
+$("settings-form").onsubmit = event => {
+  event.preventDefault(); action(event.submitter, async () => {
+    await api(`/api/activities/${activityId}/settings`, {mode:$("quiz-mode").value, fairness:$("quiz-fairness").checked});
+    notice("活動規則已儲存。", true); await refresh();
+  });
+};
+$("quiz-mode").onchange = () => {if ($("quiz-mode").value === "all") $("quiz-fairness").checked = false;};
+for (const [id, kind] of [["close-round","close"],["next-round","next"]]) $(id).onclick = () => action($(id), async () => {
+  await api(`/api/activities/${activityId}/round`, {action:kind}); await refresh();
+});
 function renderList(items) {
   const key = JSON.stringify(items); if (lastList === key) return; lastList = key;
   $("activity-count").textContent = items.length;
@@ -202,7 +212,7 @@ function updateInputs() {
   const answers = new Map(current.answers.map(a => [a.question_id, a]));
   for (const card of $("student-questions").children) {
     const answer = answers.get(card.dataset.question), input = card.querySelector("textarea"), button = card.querySelector("button");
-    const disabled = !!answer || !connected || current.phase !== "active" || pendingAnswers.has(card.dataset.question);
+    const disabled = !!answer || !connected || current.phase !== "active" || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.question);
     input.disabled = disabled; button.disabled = disabled;
     card.classList.toggle("sent", !!answer);
     card.querySelector(".question-status").textContent = answer ? "✓ 已送出" : "尚未送出";
@@ -270,6 +280,20 @@ function renderState(state) {
   $("teacher-monitor").hidden = !teacher;
   $("results").hidden = !ended;
   $("download-csv").hidden = !teacher || !ended;
+  $("settings-form").hidden = !teacher || state.phase !== "preparing";
+  if ($("settings-form").dataset.activity !== state.id) {
+    $("settings-form").dataset.activity = state.id;
+    $("quiz-mode").value = state.settings.mode; $("quiz-fairness").checked = !!state.settings.fairness;
+  }
+  const sequential = state.settings.mode === "sequential";
+  $("round-controls").hidden = !teacher || !sequential || state.phase !== "active";
+  $("close-round").hidden = !state.round.round_open;
+  $("next-round").hidden = !!state.round.round_open;
+  $("round-status").hidden = !sequential;
+  const priorityLeft = Math.max(0, Math.ceil(state.round.priority_until - state.server_time));
+  $("round-status").textContent = state.round.unit_id === null ? "逐題模式：老師開始後開放第一題。" :
+    `目前第 ${state.round.unit_id} 題 · ${state.round.round_open && !ended ? "作答中" : "已關閉"}` +
+    (priorityLeft && !ended ? ` · 保底先答剩 ${priorityLeft} 秒${state.round.own_priority ? "（本組可先答）" : ""}` : "");
   $("sheet-export-controls").hidden = !teacher || !state.source;
   if (teacher && state.source) {
     $("source-name").textContent = `來源：${state.source.sheet_title}` + (state.source.exported_at ? " · 已核對寫回" : "");

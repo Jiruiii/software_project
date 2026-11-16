@@ -111,9 +111,13 @@ def make_server(service, port=8000, sheets=None):
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
                     return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv))?", path)
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv|settings|round))?", path)
             if match:
                 aid, action = match.groups()
+                if self.command == "POST" and action == "settings":
+                    return self.respond(200, service.configure(token, aid, data.get("mode"), data.get("fairness", False)))
+                if self.command == "POST" and action == "round":
+                    return self.respond(200, service.round_action(token, aid, data.get("action")))
                 if self.command == "GET" and action == "csv":
                     return self.respond(200, service.activity_csv(token, aid), "text/csv; charset=utf-8", "classroom-results.csv")
                 if self.command == "GET" and action is None:

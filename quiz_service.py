@@ -61,6 +61,7 @@ class QuizService(ExtraFeatures):
                 activity_id TEXT PRIMARY KEY REFERENCES activities(id), source_json TEXT NOT NULL,
                 exported_at REAL);
         """)
+        self._init_extras()
 
     def close(self):
         with self.lock:
@@ -164,6 +165,7 @@ class QuizService(ExtraFeatures):
                             (aid, code, title, time.time()))
             self.db.executemany("INSERT INTO questions VALUES(?,?,?)",
                                 [(aid, q, i) for i, q in enumerate(questions)])
+            self._new_options(aid)
             return {"id": aid, "code": code}
 
     def join(self, code, group):
@@ -205,6 +207,9 @@ class QuizService(ExtraFeatures):
             field = "started_at" if target == "active" else "ended_at"
             self.db.execute(f"UPDATE activities SET phase=?, {field}=? WHERE id=?",
                             (target, time.time(), aid))
+            if self._options(aid)["mode"] == "sequential":
+                if target == "active": self._open_round(aid, 0)
+                else: self._close_round(aid)
             return {"phase": target}
 
     @staticmethod
@@ -219,6 +224,7 @@ class QuizService(ExtraFeatures):
             if activity["phase"] != "active":
                 raise QuizError(409, "目前不在作答階段，答案未送出。")
             question, answer = text(question, "題號", 40), text(answer, "答案", 2000)
+            self._submission_gate(activity, session, question)
             if not self.db.execute("SELECT 1 FROM questions WHERE activity_id=? AND id=?",
                                    (aid, question)).fetchone():
                 raise QuizError(404, "題號不存在。")
@@ -262,4 +268,4 @@ class QuizService(ExtraFeatures):
                     "SELECT a.*,g.name AS group_name FROM answers a JOIN groups g ON a.group_id=g.id WHERE a.activity_id=? ORDER BY a.id", (aid,)):
                     winners.setdefault(r["question_id"], {**self._own_answer(r), "group_name": r["group_name"]})
                 activity["results"] = [{"question_id": q, "winner": winners.get(q)} for q in activity["questions"]]
-            return activity
+            return self._extra_snapshot(activity, session)

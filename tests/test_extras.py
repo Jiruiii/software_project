@@ -2,6 +2,10 @@ import csv
 import io
 import unittest
 import threading
+import tempfile
+import sqlite3
+from pathlib import Path
+from unittest.mock import patch
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from app import make_server
@@ -51,6 +55,59 @@ class ExtraTests(unittest.TestCase):
                 self.assertIn("無人作答", response.read().decode("utf-8-sig"))
         finally:
             server.shutdown(); thread.join(); server.server_close()
+
+    def test_e02_three_misses_priority_and_new_joiner(self):
+        self.s.configure(self.t, self.aid, "sequential", True)
+        with patch("quiz_extras.time.time", return_value=100):
+            self.s.transition(self.t, self.aid, "active")
+            for q in ("1", "2", "3"):
+                self.s.submit(self.u, self.aid, q, "first")
+                with self.assertRaises(QuizError): self.s.round_action(self.t, self.aid, "next")
+                self.s.round_action(self.t, self.aid, "close")
+                self.s.round_action(self.t, self.aid, "close")
+                self.s.round_action(self.t, self.aid, "next")
+            state = self.s.snapshot(self.v, self.aid)
+            self.assertTrue(state["round"]["own_priority"])
+            self.assertEqual(["4"], state["available_questions"])
+            self.assertNotIn("eligible_json", str(state))
+            late = self.s.join(self.a["code"], "new")["token"]
+            for student in (self.u, late):
+                with self.assertRaisesRegex(QuizError, "先答"): self.s.submit(student, self.aid, "4", "early")
+            self.s.submit(self.v, self.aid, "4", "priority")
+        with patch("quiz_extras.time.time", return_value=103):
+            self.s.submit(self.u, self.aid, "4", "later")
+            self.s.round_action(self.t, self.aid, "close")
+            self.assertEqual("results", self.s.snapshot(self.t, self.aid)["phase"])
+
+    def test_e02_settings_stage_and_round_gate(self):
+        with self.assertRaises(QuizError): self.s.configure(self.u, self.aid, "sequential", True)
+        with self.assertRaises(QuizError): self.s.configure(self.t, self.aid, "all", True)
+        self.s.configure(self.t, self.aid, "sequential")
+        self.s.transition(self.t, self.aid, "active")
+        with self.assertRaises(QuizError): self.s.configure(self.t, self.aid, "all")
+        with self.assertRaises(QuizError): self.s.submit(self.u, self.aid, "2", "future")
+        self.s.round_action(self.t, self.aid, "close")
+        with self.assertRaises(QuizError): self.s.submit(self.u, self.aid, "1", "closed")
+
+    def test_e02_existing_database_migration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/"old.sqlite3"
+            service = QuizService(path, "password")
+            teacher = service.login("password")["token"]
+            a = service.create(teacher, "old", ["1"])
+            student = service.join(a["code"], "old group")["token"]
+            service.transition(teacher, a["id"], "active"); service.submit(student, a["id"], "1", "preserve")
+            service.close()
+            db = sqlite3.connect(path)
+            db.executescript("DROP TABLE question_meta; DROP TABLE group_progress; DROP TABLE activity_options;")
+            db.close()
+            service = QuizService(path, "password")
+            try:
+                state = service.snapshot(teacher, a["id"])
+                self.assertEqual("preserve", state["answers"][0]["text"])
+                self.assertEqual("all", state["settings"]["mode"])
+                self.assertEqual([{"id":"1", "questions":["1"]}], state["units"])
+            finally: service.close()
 
 
 if __name__ == "__main__": unittest.main()
