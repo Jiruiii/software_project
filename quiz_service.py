@@ -215,15 +215,17 @@ class QuizService(ExtraFeatures):
     @staticmethod
     def _own_answer(row):
         # Do not expose the global id: gaps would reveal other groups' submissions.
-        return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms")}
+        return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "stake")}
 
-    def submit(self, token, aid, question, answer):
+    def submit(self, token, aid, question, answer, stake=1):
         with self.lock, self.db:
             session = self._auth(token, "student", aid)
             activity = self._activity(aid)
             if activity["phase"] != "active":
                 raise QuizError(409, "目前不在作答階段，答案未送出。")
             question, answer = text(question, "題號", 40), text(answer, "答案", 2000)
+            if type(stake) is not int or not 1 <= stake <= 3:
+                raise QuizError(400, "下注必須是 1～3 的整數。")
             self._submission_gate(activity, session, question)
             if not self.db.execute("SELECT 1 FROM questions WHERE activity_id=? AND id=?",
                                    (aid, question)).fetchone():
@@ -231,13 +233,13 @@ class QuizService(ExtraFeatures):
             previous = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND question_id=? AND group_id=?",
                                        (aid, question, session["group_id"])).fetchone()
             if previous:
-                if previous["text"] != answer:
+                if previous["text"] != answer or previous["stake"] != stake:
                     raise QuizError(409, "本組已送出此題，不能修改答案。")
                 return self._own_answer(previous)
             received = time.time()
             elapsed = max(0, round((received - activity["started_at"]) * 1000))
-            cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms) VALUES(?,?,?,?,?,?)",
-                                     (aid, question, session["group_id"], answer, received, elapsed))
+            cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,stake) VALUES(?,?,?,?,?,?,?)",
+                                     (aid, question, session["group_id"], answer, received, elapsed, stake))
             return self._own_answer(self.db.execute("SELECT * FROM answers WHERE id=?", (cursor.lastrowid,)).fetchone())
 
     def snapshot(self, token, aid):

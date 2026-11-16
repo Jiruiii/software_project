@@ -192,12 +192,15 @@ function renderCards(state) {
     const saved = el("p", undefined, "saved-answer"); saved.hidden = true;
     const time = el("p", undefined, "answer-time"); time.hidden = true;
     const button = el("button", "送出本組答案 →", "primary wide"); button.type = "submit";
-    card.append(top, label, input, saved, time, button);
+    const stakeLabel = el("label", "信心下注（答對加分、答錯扣分）"), stake = el("select");
+    stake.id = `stake-${i}`; stakeLabel.htmlFor = stake.id; stake.className = "stake";
+    for (const value of [1,2,3]) {const option = el("option", `${value} 分`); option.value = value; stake.append(option);}
+    card.append(top, label, input, stakeLabel, stake, saved, time, button);
     card.onsubmit = (event) => {
       event.preventDefault(); const requestActivity = activityId;
       action(button, async () => {
         pendingAnswers.add(q); updateInputs();
-        try { await api(`/api/activities/${requestActivity}/answers`, {question:q, answer:input.value}); notice(`第 ${q} 題已送出。`, true); }
+        try { await api(`/api/activities/${requestActivity}/answers`, {question:q, answer:input.value, stake:Number(stake.value)}); notice(`第 ${q} 題已送出。`, true); }
         finally { pendingAnswers.delete(q); await refresh(); }
       });
     };
@@ -214,6 +217,8 @@ function updateInputs() {
     const answer = answers.get(card.dataset.question), input = card.querySelector("textarea"), button = card.querySelector("button");
     const disabled = !!answer || !connected || current.phase !== "active" || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.question);
     input.disabled = disabled; button.disabled = disabled;
+    const stake = card.querySelector('.stake'); stake.disabled = disabled;
+    if (answer) stake.value = answer.stake;
     card.classList.toggle("sent", !!answer);
     card.querySelector(".question-status").textContent = answer ? "✓ 已送出" : "尚未送出";
     input.hidden = !!answer; button.hidden = !!answer;

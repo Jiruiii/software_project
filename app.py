@@ -125,7 +125,7 @@ def make_server(service, port=8000, sheets=None):
                 if self.command == "POST" and action in ("start", "end"):
                     return self.respond(200, service.transition(token, aid, "active" if action == "start" else "results"))
                 if self.command == "POST" and action == "answers":
-                    return self.respond(200, service.submit(token, aid, data.get("question"), data.get("answer")))
+                    return self.respond(200, service.submit(token, aid, data.get("question"), data.get("answer"), data.get("stake", 1)))
                 if self.command == "POST" and action == "export":
                     return self.respond(200, sheets.export(token, aid))
             raise QuizError(404, "找不到此頁面或操作。")

@@ -21,7 +21,10 @@ async (page) => {
   await student.waitForFunction(()=>!document.querySelector('#answer-0').disabled);
   check(await student.locator('#answer-1').isDisabled(),'future question enabled');
   await student.locator('#answer-0').fill('測試答案');
+  await student.locator('#stake-0').selectOption('3');
   await student.locator('.question-card').nth(0).locator('button').click();
+  await student.waitForFunction(()=>document.querySelector('#stake-0').disabled);
+  check(await student.locator('#stake-0').inputValue()==='3','stake not preserved');
   await page.locator('#close-round').click();
   await page.locator('#next-round').waitFor({state:'visible'});
   await page.locator('#next-round').click();
@@ -48,5 +51,5 @@ async (page) => {
   check(await student.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile overflow');
   await student.screenshot({path:'output/playwright/extras-student.png',fullPage:true});
   check(!errors.length,errors.join('\n')); await student.close();
-  return {passed:true,features:['E-01','E-02','E-03'],pageErrors:errors};
+  return {passed:true,features:['E-01','E-02','E-03','E-04'],pageErrors:errors};
 }

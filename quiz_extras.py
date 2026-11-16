@@ -37,6 +37,10 @@ class ExtraFeatures:
             INSERT OR IGNORE INTO question_meta(activity_id,question_id,unit_id)
                 SELECT activity_id,id,id FROM questions;
         """)
+        columns = {r["name"] for r in self.db.execute("PRAGMA table_info(answers)")}
+        if "stake" not in columns:
+            self.db.execute("ALTER TABLE answers ADD COLUMN stake INTEGER NOT NULL DEFAULT 1")
+        self.db.commit()
 
     def _new_options(self, aid):
         self.db.execute("INSERT INTO activity_options(activity_id) VALUES(?)", (aid,))
