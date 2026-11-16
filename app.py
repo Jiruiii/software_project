@@ -155,6 +155,8 @@ def make_server(service, port=8000, sheets=None):
         do_POST = handle_request
 
     class TimedServer(ThreadingHTTPServer):
+        # A classroom burst can have dozens of clients connecting at once.
+        request_queue_size = 128
         def service_actions(self):
             service.tick()
     return TimedServer(("127.0.0.1", port), Handler)

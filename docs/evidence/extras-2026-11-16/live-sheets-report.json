@@ -1,0 +1,109 @@
+{
+  "timestampUtc": "2026-11-16T14:37:21.050173+00:00",
+  "passed": true,
+  "scope": "Real Google API; new private test workbook only; real application HTTP routes",
+  "layouts": [
+    {
+      "layout": "原版範本",
+      "passed": true,
+      "questions": 6,
+      "written": 5,
+      "targets": {
+        "1": "G5",
+        "2": "G7",
+        "3": "G9",
+        "4": "G11",
+        "5": "G13",
+        "6": "G15"
+      },
+      "identityPreserved": true,
+      "literalFormula": true,
+      "unansweredPreserved": true,
+      "retryUnchanged": true,
+      "unrelatedContentAndFormatHashBefore": "e1b6898294bcd4b050b47c35a77a995b9e72c08763106074f20d6ffad8e72306",
+      "unrelatedContentAndFormatHashAfter": "e1b6898294bcd4b050b47c35a77a995b9e72c08763106074f20d6ffad8e72306"
+    },
+    {
+      "layout": "移動列欄",
+      "passed": true,
+      "questions": 6,
+      "written": 5,
+      "targets": {
+        "1": "J13",
+        "2": "J15",
+        "3": "J17",
+        "4": "J19",
+        "5": "J21",
+        "6": "J23"
+      },
+      "identityPreserved": true,
+      "literalFormula": true,
+      "unansweredPreserved": true,
+      "retryUnchanged": true,
+      "unrelatedContentAndFormatHashBefore": "1fc43c50e3c4166ed090904a4c83af57dc0f95a0253749004d3778ceb60b9c52",
+      "unrelatedContentAndFormatHashAfter": "1fc43c50e3c4166ed090904a4c83af57dc0f95a0253749004d3778ceb60b9c52"
+    },
+    {
+      "layout": "佔位符測試",
+      "passed": true,
+      "questions": 2,
+      "written": 1,
+      "targets": {
+        "A": "C19",
+        "B": "P3"
+      },
+      "identityPreserved": true,
+      "literalFormula": true,
+      "unansweredPreserved": true,
+      "retryUnchanged": true,
+      "unrelatedContentAndFormatHashBefore": "d0e2c022fe23d96e6bf9d717366d0c36c51b68eb6407049db0cb300d1770b711",
+      "unrelatedContentAndFormatHashAfter": "d0e2c022fe23d96e6bf9d717366d0c36c51b68eb6407049db0cb300d1770b711"
+    },
+    {
+      "layout": "題組原版",
+      "passed": true,
+      "questions": 6,
+      "written": 5,
+      "targets": {
+        "1.1": "G5",
+        "1.2": "G6",
+        "2.1": "G8",
+        "2.2": "G9",
+        "3": "G11",
+        "4": "G13"
+      },
+      "identityPreserved": true,
+      "literalFormula": true,
+      "unansweredPreserved": true,
+      "retryUnchanged": true,
+      "unrelatedContentAndFormatHashBefore": "57879a1c4d3ada429656d301b428f04fb75461346468d95571ec02bb12af550b",
+      "unrelatedContentAndFormatHashAfter": "57879a1c4d3ada429656d301b428f04fb75461346468d95571ec02bb12af550b"
+    },
+    {
+      "layout": "題組移動列欄",
+      "passed": true,
+      "questions": 6,
+      "written": 5,
+      "targets": {
+        "1.1": "I10",
+        "1.2": "I11",
+        "2.1": "I13",
+        "2.2": "I14",
+        "3": "I16",
+        "4": "I18"
+      },
+      "identityPreserved": true,
+      "literalFormula": true,
+      "unansweredPreserved": true,
+      "retryUnchanged": true,
+      "unrelatedContentAndFormatHashBefore": "a5dbfd2e39d436ac0409b13f1a9d288a1f6b6ce5e75af6699ff14fcefcaa427e",
+      "unrelatedContentAndFormatHashAfter": "a5dbfd2e39d436ac0409b13f1a9d288a1f6b6ce5e75af6699ff14fcefcaa427e"
+    }
+  ],
+  "edgeCases": {
+    "noAnswerNoWrite": true,
+    "movedSourceRejected": true,
+    "rejectedExportNoWrite": true
+  },
+  "finishedUtc": "2026-11-16T14:38:20.508964+00:00"
+}

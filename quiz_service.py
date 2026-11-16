@@ -103,8 +103,13 @@ class QuizService(ExtraFeatures):
             source = json.loads(self.db.execute("SELECT source_json FROM sheet_sources WHERE activity_id=?",(aid,)).fetchone()[0])
             source["last_export"] = expected
             source["sheet_id"] = sheet_id
+            winners=self._winner_rows(aid)
+            desired={t['question']:(winners[t['question']]['text'] if t['question'] in winners else t['original'])
+                     for t in source['targets'] if t['question'] in winners or t['question'] in expected}
+            current = desired == expected
             self.db.execute("UPDATE sheet_sources SET source_json=?,exported_at=? WHERE activity_id=?",
-                            (json.dumps(source,ensure_ascii=False),time.time(),aid))
+                            (json.dumps(source,ensure_ascii=False),time.time() if current else None,aid))
+            return current
 
     def _token(self, role, activity_id=None, group_id=None):
         raw = secrets.token_urlsafe(32)
@@ -278,5 +283,6 @@ class QuizService(ExtraFeatures):
                 winners = {}
                 for r in self._winner_rows(aid).values():
                     winners.setdefault(r["question_id"], {**self._own_answer(r), "group_name": r["group_name"]})
-                activity["results"] = [{"question_id": q, "winner": winners.get(q)} for q in activity["questions"]]
+                answered={r['question_id'] for r in self.db.execute('SELECT DISTINCT question_id FROM answers WHERE activity_id=?',(aid,))}
+                activity["results"] = [{"question_id": q, "winner": winners.get(q), "has_answers":q in answered} for q in activity["questions"]]
             return self._extra_snapshot(activity, session)

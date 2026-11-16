@@ -82,6 +82,19 @@ class SheetsWorkflowTests(unittest.TestCase):
         imported=self.imported()
         self.assertEqual(['1.1','1.2'],self.service.snapshot(self.teacher,imported['id'])['units'][0]['questions'])
 
+    def test_judgment_during_export_requires_retry(self):
+        a,_=self.ended(); aid=a['id']; answer=self.service.snapshot(self.teacher,aid)['answers'][0]
+        request=self.google.request
+        def raced(owner,sid,body=None):
+            result=request(owner,sid,body)
+            if body: self.service.review(self.teacher,aid,answer['id'],'incorrect')
+            return result
+        self.google.request=raced
+        with self.assertRaisesRegex(QuizError,'判定已改變'): self.flow.export(self.teacher,aid)
+        self.assertTrue(self.service.snapshot(self.teacher,aid)['source']['export_stale'])
+        self.google.request=request; self.flow.export(self.teacher,aid)
+        self.assertEqual('',from_google(self.google.data)[0].value(4,6))
+
     def test_preview_import_privacy_and_atomic_failure(self):
         preview=self.flow.preview(self.teacher,COPY_URL)
         self.assertEqual(6,preview["count"])

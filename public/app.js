@@ -44,6 +44,7 @@ function showView() {
   $("back").hidden = auth?.role !== "teacher";
 }
 function saveAuth(value) {
+  resetReplay();
   for (const key of Object.keys(sessionStorage)) if (key.startsWith('classroom.draft.')) sessionStorage.removeItem(key);
   generation++;
   auth = value; activityId = value?.activity_id || null; current = null;
@@ -57,6 +58,7 @@ function saveAuth(value) {
   showView(); connection(true);
 }
 function selectActivity(id) {
+  resetReplay();
   generation++; activityId = id; current = null; cardsKey = lastMonitor = lastResults = "";
   if (id) sessionStorage.setItem("classroom.activity", id); else sessionStorage.removeItem("classroom.activity");
   showView(); notice(""); refresh();
@@ -280,7 +282,7 @@ function renderResults(state) {
   for (const result of state.results) {
     const row = el("div", undefined, "result-row"), detail = el("div");
     row.append(el("span", `第 ${result.question_id} 題`, "result-number"));
-    detail.append(el("div", result.winner ? `${result.winner.group_name} · 搶答成功（${verdictNames[result.winner.verdict]}）` : "無成功組別", "winner"));
+    detail.append(el("div", result.winner ? `${result.winner.group_name} · 搶答成功（${verdictNames[result.winner.verdict]}）` : result.has_answers ? "無成功組別（候選已判錯）" : "無人作答", "winner"));
     if (result.winner) detail.append(el("p", result.winner.text, "result-answer"));
     row.append(detail); list.append(row);
   }

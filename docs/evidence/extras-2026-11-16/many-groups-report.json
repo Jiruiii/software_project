@@ -1,0 +1,107 @@
+{
+  "timestampUtc": "2026-11-16T14:50:23.162038+00:00",
+  "passed": true,
+  "http": [
+    {
+      "scenario": "30 groups x 6 questions x 3 rounds",
+      "answers": 540,
+      "rounds": [
+        {
+          "round": 1,
+          "answers": 180,
+          "winners": [
+            "測試組00",
+            "測試組08",
+            "測試組18",
+            "測試組08",
+            "測試組29",
+            "測試組10"
+          ]
+        },
+        {
+          "round": 2,
+          "answers": 180,
+          "winners": [
+            "測試組12",
+            "測試組22",
+            "測試組01",
+            "測試組00",
+            "測試組04",
+            "測試組02"
+          ]
+        },
+        {
+          "round": 3,
+          "answers": 180,
+          "winners": [
+            "測試組01",
+            "測試組00",
+            "測試組07",
+            "測試組02",
+            "測試組05",
+            "測試組08"
+          ]
+        }
+      ],
+      "requestP95Ms": 125.9,
+      "requestMaxMs": 187.0
+    },
+    {
+      "scenario": "end races with 30 groups",
+      "acceptedBeforeEnd": 11,
+      "rejectedAfterEnd": 30
+    },
+    {
+      "scenario": "known first / 30 conflicting submissions / 30 identical retries",
+      "conflictsRejected": 29,
+      "singleSavedAnswer": true
+    }
+  ],
+  "browser": {
+    "passed": true,
+    "simulatedGroups": 30,
+    "questions": 6,
+    "savedAnswers": 180,
+    "actualBrowserTabs": 4,
+    "studentTabsChecked": 3,
+    "teacherCellsChecked": 180,
+    "startSyncMs": 585,
+    "endSyncMs": 569,
+    "teacherDisplayLagMs": 459,
+    "winners": [
+      {
+        "question": "1",
+        "group": "測試組01",
+        "text": "測試組01 / 第 1 題"
+      },
+      {
+        "question": "2",
+        "group": "測試組06",
+        "text": "測試組06 / 第 2 題"
+      },
+      {
+        "question": "3",
+        "group": "測試組11",
+        "text": "測試組11 / 第 3 題"
+      },
+      {
+        "question": "4",
+        "group": "測試組16",
+        "text": "測試組16 / 第 4 題"
+      },
+      {
+        "question": "5",
+        "group": "測試組21",
+        "text": "測試組21 / 第 5 題"
+      },
+      {
+        "question": "6",
+        "group": "測試組26",
+        "text": "測試組26 / 第 6 題"
+      }
+    ],
+    "pageErrors": []
+  },
+  "scope": "localhost simulation; no real Google access; not 30 physical devices",
+  "httpPassed": true
+}

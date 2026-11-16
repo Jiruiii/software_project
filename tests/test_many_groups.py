@@ -135,7 +135,11 @@ class ManyGroupsTests(unittest.TestCase):
         self.assertTrue(all(a["received_at"]<=ended["ended_at"] for a in ended["answers"]))
         late=self.together([lambda t=t:self.request(path+"/answers",{"question":"2","answer":"late"},t) for t in people])
         self.assertTrue(all(status==409 for status,_ in late))
-        self.assertEqual(ended,self.ok(path,token=self.teacher))
+        after=self.ok(path,token=self.teacher)
+        # Server clock advances for countdown displays; the stored activity,
+        # answers, winners and scores must all remain unchanged.
+        self.assertGreaterEqual(after.pop('server_time'),ended.pop('server_time'))
+        self.assertEqual(ended,after)
         self.metrics.append({"scenario":"end races with 30 groups", "acceptedBeforeEnd":accepted,"rejectedAfterEnd":30})
 
 

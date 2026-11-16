@@ -216,6 +216,7 @@ class SheetsWorkflow:
                 q = target["question"]
                 if q in expected and after[0].cells.get((target["row"],target["col"]), "") != expected[q]:
                     raise QuizError(502, "寫回後內容核對失敗，請檢查原表；未標記匯出成功。")
-            self.service.record_export(token, aid, expected, grid.sheet_id)
+            if not self.service.record_export(token, aid, expected, grid.sheet_id):
+                raise QuizError(409, "寫回期間老師判定已改變，已保留本次寫入紀錄，請重新寫回最新結果。")
             return {"written":len(expected), "message":f"已核對 {len(expected)} 題答案寫回原工作表。",
                     "url":f"https://docs.google.com/spreadsheets/d/{sid}/edit#gid={grid.sheet_id}"}
