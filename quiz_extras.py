@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 import io
 import json
 import time
+import unicodedata
+from difflib import SequenceMatcher
 
 
 def csv_bytes(rows):
@@ -17,6 +19,29 @@ def csv_bytes(rows):
 
 
 class ExtraFeatures:
+    def clusters(self, token, aid, question):
+        from quiz_service import QuizError
+        with self.lock:
+            self._auth(token, "teacher")
+            state = self.snapshot(token, aid)
+            if question not in state["questions"]: raise QuizError(404, "題號不存在。")
+            answers = [a for a in state["answers"] if a["question_id"] == question]
+        # Copy under the lock, compare outside it so submissions never wait on
+        # quadratic string matching. Beyond 200 representatives use exact only.
+        clusters, exact, limited = [], {}, False
+        for answer in answers:
+            normalized = " ".join(unicodedata.normalize("NFKC", answer["text"]).casefold().split())
+            index = exact.get(normalized)
+            if index is None and len(clusters) < 200:
+                index = next((i for i, c in enumerate(clusters) if SequenceMatcher(None, normalized, c["normalized"]).ratio() >= .85), None)
+            elif index is None:
+                limited = True
+            if index is None:
+                index = len(clusters); clusters.append({"normalized":normalized, "answers":[]})
+            exact[normalized] = index
+            clusters[index]["answers"].append({k:answer[k] for k in ("group_name", "text")})
+        return {"clusters":clusters, "threshold":.85, "limited":limited}
+
     def _init_extras(self):
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS activity_options (

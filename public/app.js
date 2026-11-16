@@ -322,6 +322,11 @@ function renderState(state) {
   renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
+  $("classification").hidden = !teacher;
+  if ($("classification").dataset.activity !== state.id) {
+    $("classification").dataset.activity = state.id; $("cluster-list").replaceChildren(); $("cluster-limit").textContent = '';
+    $("cluster-question").replaceChildren(...state.questions.map(q=>{const option=el('option',`第 ${q} 題`); option.value=q; return option;}));
+  }
   $("session-title").textContent = state.title;
   $("session-code").textContent = state.code;
   $("session-subtitle").textContent = teacher ? `${state.questions.length} 道題目 · 掌握每一組的思考` : `${state.group_name} · ${state.questions.length} 道題目，一起完成`;
@@ -390,3 +395,15 @@ async function refresh() {
 }
 async function poll() {await refresh(); setTimeout(poll, 700);}
 showView(); connection(true); poll();
+$("cluster-refresh").onclick = () => action($("cluster-refresh"), async () => {
+  const id = activityId, question = $("cluster-question").value;
+  const result = await api(`/api/activities/${id}/clusters`, {question});
+  if (activityId !== id || $("cluster-question").value !== question) return;
+  $("cluster-limit").textContent = result.limited ? '已超過 200 類，後續答案僅比較相同文字。' : '已更新目前答案分類。';
+  $("cluster-list").replaceChildren(...result.clusters.map((cluster,i) => {
+    const section = el('section'), list = el('ul'); section.append(el('h4',`分類 ${i+1} · ${cluster.answers.length} 組`));
+    for (const answer of cluster.answers) list.append(el('li',`${answer.group_name}：${answer.text}`));
+    section.append(list); return section;
+  }));
+});
+$("cluster-question").onchange = () => {$("cluster-list").replaceChildren(); $("cluster-limit").textContent='請按比較目前答案。';};

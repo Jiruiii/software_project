@@ -103,6 +103,11 @@
           </section>
           <div id="student-questions" class="question-grid" hidden></div>
           <div id="teacher-monitor" hidden><div id="monitor-summary" class="monitor-summary"></div><div id="monitor-table" class="table-scroll"></div></div>
+          <section id="classification" class="panel" hidden><h3>答案歸類</h3>
+            <p class="field-hint">忽略全半形、大小寫與多餘空白；相似度達 85% 歸為一類。文字相近，不代表同義或正確。</p>
+            <label for="cluster-question">選擇題號</label><select id="cluster-question"></select><button id="cluster-refresh" class="primary">比較目前答案</button>
+            <p id="cluster-limit"></p><div id="cluster-list"></div>
+          </section>
         </div>
       </div>
     </section>

@@ -119,6 +119,21 @@ class ExtraTests(unittest.TestCase):
             self.assertEqual(first["received_at"], winner["received_at"])
             self.assertEqual("first", winner["text"])
 
+    def test_e06_clusters_unicode_similarity_and_isolation(self):
+        self.s.transition(self.t, self.aid, "active")
+        self.s.submit(self.u, self.aid, "1", "ＡＢＣ   def")
+        self.s.submit(self.v, self.aid, "1", "abc def")
+        other = self.s.join(self.a["code"], "C")["token"]
+        self.s.submit(other, self.aid, "1", "abc def!")
+        before = self.s.snapshot(self.t, self.aid)["answers"]
+        result = self.s.clusters(self.t, self.aid, "1")
+        self.assertEqual(1, len(result["clusters"]))
+        self.assertEqual(3, len(result["clusters"][0]["answers"]))
+        self.assertEqual("ＡＢＣ   def", result["clusters"][0]["answers"][0]["text"])
+        self.assertEqual(before, self.s.snapshot(self.t, self.aid)["answers"])
+        with self.assertRaises(QuizError): self.s.clusters(self.u, self.aid, "1")
+        with self.assertRaises(QuizError): self.s.clusters(self.t, self.aid, "unknown")
+
     def test_e02_existing_database_migration(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/"old.sqlite3"
