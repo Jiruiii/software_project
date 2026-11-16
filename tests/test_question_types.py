@@ -100,6 +100,30 @@ class QuestionTypeTests(unittest.TestCase):
         self.assertEqual('=1+1',from_google(google.data)[0].value(4,6))
         self.assertEqual({'stringValue':'=1+1'},google.writes[0][1]['requests'][0]['updateCells']['rows'][0]['values'][0]['userEnteredValue'])
 
+    def test_live_own_score_privacy_regrade_and_activity_isolation(self):
+        self.s.question_settings(self.t,self.aid,'1',True,[choice()])
+        self.s.configure(self.t,self.aid,'sequential')
+        self.s.transition(self.t,self.aid,'active')
+        self.s.submit(self.u,self.aid,'1','乙',3); self.s.submit(self.v,self.aid,'1','甲',2)
+        own=self.s.snapshot(self.u,self.aid); other=self.s.snapshot(self.v,self.aid)
+        self.assertEqual({'total':3,'pending_units':0},own['own_score'])
+        self.assertEqual(-2,other['own_score']['total'])
+        for key in ('groups','results','scoreboard'): self.assertNotIn(key,own)
+        self.assertNotIn('correct_index',json.dumps(own))
+        self.s.round_action(self.t,self.aid,'close')
+        answer=self.s.snapshot(self.t,self.aid)['answers'][0]
+        self.s.review(self.t,self.aid,answer['id'],'incorrect')
+        self.assertEqual(-3,self.s.snapshot(self.u,self.aid)['own_score']['total'])
+        self.s.round_action(self.t,self.aid,'next')
+        self.s.submit(self.u,self.aid,'2','待批改',2)
+        self.assertEqual({'total':-3,'pending_units':1},self.s.snapshot(self.u,self.aid)['own_score'])
+        self.s.transition(self.t,self.aid,'results')
+        rows=self.s.snapshot(self.t,self.aid)['answers']; self.s.review(self.t,self.aid,rows[-1]['id'],'correct')
+        self.assertEqual({'total':-1,'pending_units':0},self.s.snapshot(self.u,self.aid)['own_score'])
+        a=self.s.create(self.t,'new',['1']); u=self.s.join(a['code'],'A')['token']
+        self.assertEqual(0,self.s.snapshot(u,a['id'])['own_score']['total'])
+        with self.assertRaises(QuizError): self.s.snapshot(self.u,a['id'])
+
     def test_http_does_not_accept_client_verdict_or_score(self):
         server=make_server(self.s,0); thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
         def post(action,data,token):

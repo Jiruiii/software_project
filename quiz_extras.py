@@ -76,6 +76,16 @@ class ExtraFeatures:
         if all(a["verdict"] == "correct" for a in answers): return answers[0]["stake"]
         return 0
 
+    def _own_score(self, answers, units):
+        lookup={a['question_id']:a for a in answers}
+        total, pending=0,0
+        for qs in units.values():
+            own=[lookup[q] for q in qs if q in lookup]
+            total += self._unit_points(own,qs)
+            if own and not any(a['verdict']=='incorrect' for a in own) and any(a['verdict']=='pending' for a in own):
+                pending += 1
+        return {'total':total,'pending_units':pending}
+
     def reference(self, token, aid, question, answer):
         from quiz_service import QuizError
         with self.lock, self.db:
@@ -349,6 +359,7 @@ class ExtraFeatures:
         options = self._options(state["id"])
         units = self._units(state["id"])
         state["units"] = [{"id": u, "questions": qs} for u, qs in units.items()]
+        if session['role'] == 'student': state['own_score'] = self._own_score(state['answers'],units)
         state["settings"] = {k: options[k] for k in ("mode", "fairness", "duration_seconds")}
         state["server_time"] = time.time()
         state["round"] = {k: options[k] for k in ("round_index", "round_open", "round_started_at", "priority_until", "deadline")}
