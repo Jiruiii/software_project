@@ -1,0 +1,43 @@
+// Live public read/import only; no Google authorization or real cloud write.
+async (page) => {
+  const check=(value,message)=>{if(!value)throw new Error(message);};
+  const errors=[]; page.on('pageerror',error=>errors.push(String(error)));
+  await page.goto('http://127.0.0.1:8765');
+  await page.evaluate(()=>sessionStorage.clear()); await page.reload();
+  await page.setViewportSize({width:1360,height:1000});
+  await page.locator('#choose-teacher').click();
+  await page.locator('#teacher-password').fill('classroom-qa-only');
+  await page.locator('#login-form button').click();
+  await page.locator('#dashboard').waitFor({state:'visible'});
+  await page.locator('#google-connect').click();
+  await page.locator('#notice').filter({hasText:'尚未設定 Google OAuth'}).waitFor();
+  await page.locator('#sheet-url').fill('https://docs.google.com/spreadsheets/d/12uh5xhIx2wXFMy42KU8lN7rLFQ8GDugt9zfAFEvu-1E/edit');
+  await page.locator('#sheet-preview-form button').click();
+  await page.locator('#sheet-preview').waitFor({state:'visible',timeout:45000});
+  check(await page.locator('#sheet-preview-table tbody tr').count()===6,'not six questions');
+  check((await page.locator('#sheet-preview-table').innerText()).includes('G15'),'missing dynamic target');
+  await page.locator('#sheet-preview').scrollIntoViewIfNeeded();
+  await page.screenshot({path:'output/playwright/sheets-preview.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'sheets mobile overflow');
+  await page.screenshot({path:'output/playwright/sheets-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1360,height:1000});
+  await page.locator('#sheet-import').click();
+  await page.locator('#activity').waitFor({state:'visible',timeout:45000});
+  check((await page.locator('#session-subtitle').innerText()).includes('6 道題目'),'import count mismatch');
+  check(await page.locator('#sheet-export').isHidden(),'export visible before end');
+  const code=await page.locator('#session-code').innerText();
+  const student=await page.context().newPage(); await student.goto('http://127.0.0.1:8765');
+  await student.locator('#join-code').fill(code); await student.locator('#join-group').fill('範本測試組');
+  await student.locator('#join-form button').click();
+  await student.locator('#activity').waitFor({state:'visible'});
+  check(await student.locator('.question-card').count()===6,'student count mismatch');
+  check(await student.locator('#sheet-export-controls').isHidden(),'student can see source');
+  await page.locator('#start').click(); await page.locator('#end').waitFor({state:'visible'}); await page.locator('#end').click();
+  await page.locator('#sheet-export').waitFor({state:'visible'}); await page.locator('#sheet-export').click();
+  await page.locator('#notice').filter({hasText:'官方範本僅供讀取'}).waitFor();
+  await page.screenshot({path:'output/playwright/sheets-results.png',fullPage:true});
+  check(!errors.length,errors.join('\n'));
+  await student.close();
+  return {passed:true,livePublicQuestions:6,studentQuestions:6,officialWriteBlocked:true,realGoogleWriteTested:false,pageErrors:errors};
+}

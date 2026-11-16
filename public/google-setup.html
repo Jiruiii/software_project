@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Google 首次設定｜課間</title><link rel="stylesheet" href="/style.css"></head>
+<body><header class="topbar"><a class="brand" href="/">課間 · Google 首次設定</a></header><main class="setup-guide">
+<span class="eyebrow">一次設定，之後從教師頁連線</span><h1>讓答案回到你的學習單</h1>
+<p>先完成以下設定，再到教師頁連線。公開學習單可直接讀取；寫回答案需要你自己的 Google 帳號與可編輯的副本。</p>
+<ol class="setup-steps">
+<li><h2>建立 Google Cloud 專案</h2><p>使用自己的 Google 帳號開啟 <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud Console</a>，建立專案，例如「課堂搶答」。後續操作都選取這個專案。</p></li>
+<li><h2>啟用 Google Sheets API</h2><p>進入「API 和服務 → 程式庫」，搜尋 Google Sheets API 並啟用。這個程式不需要啟用 Google Drive API。</p></li>
+<li><h2>設定 Google Auth Platform</h2><p>進入「Google Auth Platform」（部分介面稱 OAuth 同意畫面），完成應用程式名稱、支援電子郵件與聯絡電子郵件。個人帳號選 External／外部，保留測試模式，並在 Audience／目標對象把自己的 Google 電子郵件加入測試使用者。</p><p>在 Data Access／資料存取新增範圍 <code>https://www.googleapis.com/auth/spreadsheets</code>。學校帳號可能受管理員政策限制；若無法建立或授權，請依學校規定處理。</p></li>
+<li><h2>建立「電腦版應用程式」用戶端</h2><p>在 Clients／用戶端新增 OAuth 用戶端，應用程式類型選「Desktop app／電腦版應用程式」，下載 JSON。不要選網頁應用程式。將下載的檔案改名為 <code>google-oauth-client.json</code>，放在：</p><p><code>D:\software_project\credentials\google-oauth-client.json</code></p><p>如果 credentials 資料夾不存在，先建立即可。不用把 JSON、密碼或權杖貼到聊天；程式會直接讀取本機檔案。</p></li>
+<li><h2>建立自己的學習單副本並連線</h2><p><a href="https://docs.google.com/spreadsheets/d/12uh5xhIx2wXFMy42KU8lN7rLFQ8GDugt9zfAFEvu-1E/copy" target="_blank" rel="noopener">複製官方單題範本</a>，確認副本由你編輯。啟動課間、以教師登入，按「連線 Google」，再點「開啟 Google 授權頁」。請用一般 Chrome／Edge，授權剛才加入測試使用者的帳號。看到連線成功後，回原本教師分頁。</p><p>程式使用本機回呼，不需部署網址。若 Google 顯示未驗證提示，先確認應用程式是自己剛建立的專案；拒絕授權可回教師頁重試。</p></li>
+<li><h2>匯入，完成一輪，再核對寫回</h2><p>貼上自己副本的連結，按讀取預覽，核對六個題號及答案格，建立活動。另開學生分頁加入，老師開始、學生送出、老師結束後，按「寫回成功答案」。回到原副本，核對成功答案已寫入，題目、其他內容與格式保留。</p><p>若要測試不同版面，先複製另一份、插入列或欄，再重新匯入並跑一輪。匯入後若更動題目或列欄，程式會要求重新匯入；寫回期間請不要同時編輯來源。</p></li>
+</ol>
+<div class="panel"><h2>常見狀況</h2><p>「尚未設定」：檢查副檔名是否被多加成 .json.json，以及檔案是否為電腦版用戶端。</p><p>「access_denied」：確認登入的帳號已加入測試使用者，且同意 Sheets 權限。</p><p>「權限不足」：確認 Google Sheets API 已啟用、使用同一專案的用戶端，且帳號有原表編輯權限。</p><p>重新啟動伺服器或教師登出後，需要再次連線 Google。中斷連線只清除本機授權；也可到 Google 帳號的第三方連線頁撤銷存取。</p></div>
+<p class="field-hint">技術參考：<a href="https://developers.google.com/identity/protocols/oauth2/native-app">Google 電腦版應用程式 OAuth 文件</a>、<a href="https://developers.google.com/workspace/sheets/api/quickstart/python">Sheets API 設定文件</a>。</p>
+</main></body></html>

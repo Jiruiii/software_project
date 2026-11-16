@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>課間｜課堂搶答</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="課間首頁"><span class="brand-mark">課</span>課間 <span class="brand-detail">CLASSROOM</span></a>
+    <div class="top-actions"><span id="connection" class="connection">本機課堂</span><button id="logout" class="text-button" hidden>離開此身分</button></div>
+  </header>
+  <main>
+    <div id="notice" role="alert" hidden></div>
+    <section id="entry" class="entry-layout">
+      <div class="intro">
+        <span class="eyebrow">讓每一組的想法，都有回應</span>
+        <h1>一起思考。<br>準備好，就搶答。</h1>
+        <p>一個課堂，許多好點子。<br>加入小組，寫下答案，讓討論開始。</p>
+        <div class="intro-notes"><span>01 選擇身分</span><span>02 加入活動</span><span>03 一起作答</span></div>
+        <div class="illustration" aria-hidden="true"><span class="paper paper-a">Q<span>想法，正在發生。</span></span><span class="paper paper-b">A<span>寫下你的答案</span></span><span class="spark">✳</span></div>
+      </div>
+      <div class="entry-card">
+        <div class="role-switch" role="group" aria-label="選擇身分"><button id="choose-student" aria-pressed="true">我是學生</button><button id="choose-teacher" aria-pressed="false">我是老師</button></div>
+        <form id="join-form">
+          <span class="eyebrow">STUDENT SPACE</span><h2>找到你的課堂</h2><p class="muted">輸入老師提供的代碼，和組員一起加入。</p>
+          <label for="join-code">活動代碼</label><input id="join-code" name="code" maxlength="6" minlength="6" placeholder="例如 ABC234" autocomplete="off" required>
+          <label for="join-group">小組名稱</label><input id="join-group" name="group" maxlength="40" placeholder="例如 第 1 組" required>
+          <p class="field-hint">同組同學請使用相同名稱，共同送出一份答案。</p>
+          <button type="submit" class="primary wide">加入活動 <span aria-hidden="true">↗</span></button>
+        </form>
+        <form id="login-form" hidden>
+          <span class="eyebrow">TEACHER SPACE</span><h2>開啟今天的討論</h2><p class="muted">登入後建立活動、掌握作答並公布結果。</p>
+          <label for="teacher-password">教師密碼</label><input id="teacher-password" name="password" type="password" placeholder="啟動服務時設定的密碼" autocomplete="current-password" required>
+          <p class="field-hint">教師專用。學生只需要活動代碼即可加入。</p>
+          <button type="submit" class="primary wide">進入教師空間 <span aria-hidden="true">↗</span></button>
+        </form>
+        <div class="entry-footer"><span class="small-dot"></span> 作答中，只有老師能看到所有組別的答案。</div>
+      </div>
+    </section>
+    <section id="dashboard" hidden>
+      <div class="section-heading"><div><span class="eyebrow">TEACHER SPACE</span><h1>今天，想一起討論什麼？</h1><p class="muted">建立一場活動，或接續你的課堂紀錄。</p></div><span class="badge">教師</span></div>
+      <div class="dashboard-grid">
+        <form id="create-form" class="panel">
+          <div class="panel-heading"><h2>建立活動</h2><span class="step-number">01</span></div>
+          <label for="activity-title">活動名稱</label><input id="activity-title" maxlength="100" placeholder="例如 第三週・課堂討論" required>
+          <label for="question-numbers">題號 <span class="muted">每行一題</span></label><textarea id="question-numbers" rows="5" placeholder="1&#10;2&#10;3" required></textarea>
+          <p class="field-hint">輸入 1～100 個不重複題號。學生依課堂學習單作答。</p>
+          <button class="primary wide" type="submit">建立並進入活動 <span aria-hidden="true">→</span></button>
+          <p class="integration-note">有 Guided Notes 學習單？請使用下方 Google Sheets 匯入，才能寫回原表。</p>
+        </form>
+        <div class="panel"><div class="panel-heading"><h2>我的課堂活動</h2><span id="activity-count" class="count">0</span></div><div id="activity-list"></div></div>
+      </div>
+      <section class="panel sheets-panel">
+        <div class="panel-heading"><h2>從 Google Sheets 建立活動</h2><span class="badge">Guided Notes</span></div>
+        <p class="muted">貼上自己的學習單連結，先核對題號與答案格，再建立活動。公開表不需登入即可讀取；私人表與寫回需先連線 Google。</p>
+        <div class="google-controls"><span id="google-status" class="muted">檢查 Google 設定中…</span><button id="google-connect" class="text-button">連線 Google</button><button id="google-disconnect" class="text-button" hidden>中斷 Google 連線</button><a href="/google-setup.html" target="_blank" rel="noopener" class="text-button">首次設定說明 ↗</a></div>
+        <a id="google-auth-link" class="primary" target="_blank" rel="noopener" hidden>開啟 Google 授權頁 ↗</a>
+        <form id="sheet-preview-form">
+          <label for="sheet-url">Google Sheets 連結</label><input id="sheet-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/…/edit" required>
+          <div id="worksheet-field" hidden><label for="sheet-worksheet">選擇工作表</label><select id="sheet-worksheet"></select></div>
+          <button class="primary" type="submit">讀取並預覽題號 →</button>
+        </form>
+        <div id="sheet-preview" hidden><h3 id="sheet-preview-title"></h3><p id="sheet-preview-warning" class="integration-note"></p><div id="sheet-preview-table" class="table-scroll"></div>
+          <label for="sheet-activity-title">匯入後的活動名稱</label><input id="sheet-activity-title" maxlength="100" placeholder="例如 第四週・學習單搶答">
+          <button id="sheet-import" class="primary">確認題號，建立活動 →</button>
+        </div>
+        <p class="field-hint">官方範本：<a href="https://docs.google.com/spreadsheets/d/12uh5xhIx2wXFMy42KU8lN7rLFQ8GDugt9zfAFEvu-1E/copy" target="_blank" rel="noopener">複製單題學習單 ↗</a>。先建立副本再貼上你的連結，答案才會寫回你自己的表。</p>
+      </section>
+    </section>
+    <section id="activity" hidden>
+      <button id="back" class="text-button back" hidden>← 返回活動清單</button>
+      <div class="section-heading"><div><span id="activity-eyebrow" class="eyebrow">CLASSROOM SESSION</span><h1 id="session-title"></h1><p id="session-subtitle" class="muted"></p></div><span id="role-badge" class="badge"></span></div>
+      <div class="session-layout">
+        <aside class="session-sidebar">
+          <div class="code-block"><span>活動代碼</span><strong id="session-code"></strong><p>讓同學在另一個分頁輸入此代碼。</p></div>
+          <ol class="phase-steps" aria-label="活動階段"><li data-phase="preparing"><span>01</span><div>準備中<small>加入小組，準備作答</small></div></li><li data-phase="active"><span>02</span><div>作答中<small>思考答案，即時送出</small></div></li><li data-phase="results"><span>03</span><div>結果<small>看看每題的搶答成果</small></div></li></ol>
+          <div id="teacher-controls" hidden><button id="start" class="primary wide">開始搶答 →</button><button id="end" class="danger wide" hidden>結束搶答並公布結果</button></div>
+          <p id="session-rule" class="sidebar-note"></p>
+          <div id="sheet-export-controls" hidden><p id="source-name" class="sidebar-note"></p><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟來源學習單 ↗</a><button id="sheet-export" class="primary wide">寫回成功答案 →</button><p class="field-hint">只修改原學習單的答案格。匯出期間請勿移動原表列欄；Google 尚未連線時，先返回活動清單連線。</p></div>
+        </aside>
+        <div class="session-main">
+          <div class="live-heading"><h2 id="content-title">準備作答</h2><span id="phase-label" class="phase-pill"></span></div>
+          <p id="phase-help" class="muted"></p>
+          <div id="results" hidden></div>
+          <div id="student-questions" class="question-grid" hidden></div>
+          <div id="teacher-monitor" hidden><div id="monitor-summary" class="monitor-summary"></div><div id="monitor-table" class="table-scroll"></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer"><span>課間 · 讓課堂多一點參與</span><span>本機課堂搶答系統</span></footer>
+</body>
+</html>
