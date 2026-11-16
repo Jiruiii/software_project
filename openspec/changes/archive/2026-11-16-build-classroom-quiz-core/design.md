@@ -2,7 +2,7 @@
 
 ## Context
 
-首批十二項核心已實作與驗收。使用者指出的另一份《期末專題說明.pdf》提供單題及題組範本；已唯讀取得並解析。使用者已確認只做 15 項核心，且先完成 OAuth 程式再設定其 Google Cloud 用戶端；真實授權驗收仍保持未完成。
+使用者指出的另一份《期末專題說明.pdf》提供單題及題組範本；已唯讀取得並解析。使用者確認只做 15 項核心，先完成 OAuth 程式再設定其 Google Cloud 用戶端。2026-11-16 已完成本機回歸及三種版面的真實 Google 授權、匯入與寫回驗收，詳細證據見 verification.md。
 
 ## Goals / Non-Goals
 
@@ -45,6 +45,8 @@ API：POST /api/teacher/login、POST /api/join、POST /api/logout；GET /api/act
 外部請求與活動狀態鎖分離，Google 慢回應不阻塞學生輪詢。匯出以獨立鎖避免本機並行重送；Google API 無跨前置讀取及寫入的比較交換，因此匯出期間需避免其他人移動欄列，程式進行前後核對但不承諾能排除外部同時編輯競爭。變更偵測採保守策略，無關文字變動也要求重新匯入。
 
 新增教師 API：GET /api/google/status，POST /api/google/connect、/disconnect，GET /oauth/callback，POST /api/sheets/preview、/import，POST /api/activities/{id}/export。預覽在教師記憶體 session 中有效 10 分鐘，匯入時重新讀取避免使用過期映射。
+
+雲端驗收工具 `tests/run_live_sheets.py` 使用獨立本機服務、記憶體資料庫及互動 OAuth。僅建立並修改新的私人測試表，匯入／作答／匯出皆經主程式 HTTP 路由；以測試範本的獨立座標對照與 Google 回讀快照驗證，避免只以解析器驗證自己。比對儲存的值、格式、備註、合併格與列欄屬性，公開報告不含私人試算表連結或授權資料。標記型答案格寫回後標記會消失，下一輪需使用未填副本；表頭型範本可再次匯入。
 
 參考：[OAuth Desktop](https://developers.google.com/identity/protocols/oauth2/native-app)、[Sheets get](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/get)、[Sheets batchUpdate](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/batchUpdate)。
 

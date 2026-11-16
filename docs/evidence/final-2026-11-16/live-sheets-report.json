@@ -1,0 +1,69 @@
+{
+  "timestampUtc": "2026-11-16T10:30:46.538470+00:00",
+  "passed": true,
+  "scope": "Real Google API; new private test workbook only; real application HTTP routes",
+  "layouts": [
+    {
+      "layout": "原版範本",
+      "passed": true,
+      "questions": 6,
+      "written": 5,
+      "targets": {
+        "1": "G5",
+        "2": "G7",
+        "3": "G9",
+        "4": "G11",
+        "5": "G13",
+        "6": "G15"
+      },
+      "identityPreserved": true,
+      "literalFormula": true,
+      "unansweredPreserved": true,
+      "retryUnchanged": true,
+      "unrelatedContentAndFormatHashBefore": "610f270f6398047741af1a3c3bb2f61d4e9c4ddfc05423dc3d3eccea2278d34a",
+      "unrelatedContentAndFormatHashAfter": "610f270f6398047741af1a3c3bb2f61d4e9c4ddfc05423dc3d3eccea2278d34a"
+    },
+    {
+      "layout": "移動列欄",
+      "passed": true,
+      "questions": 6,
+      "written": 5,
+      "targets": {
+        "1": "J13",
+        "2": "J15",
+        "3": "J17",
+        "4": "J19",
+        "5": "J21",
+        "6": "J23"
+      },
+      "identityPreserved": true,
+      "literalFormula": true,
+      "unansweredPreserved": true,
+      "retryUnchanged": true,
+      "unrelatedContentAndFormatHashBefore": "602b706a851c423143c85cadb644f32050a001f3d3e847e5f6423f90b900b8db",
+      "unrelatedContentAndFormatHashAfter": "602b706a851c423143c85cadb644f32050a001f3d3e847e5f6423f90b900b8db"
+    },
+    {
+      "layout": "佔位符測試",
+      "passed": true,
+      "questions": 2,
+      "written": 1,
+      "targets": {
+        "A": "C19",
+        "B": "P3"
+      },
+      "identityPreserved": true,
+      "literalFormula": true,
+      "unansweredPreserved": true,
+      "retryUnchanged": true,
+      "unrelatedContentAndFormatHashBefore": "a9ee756454d79a1a971c2505552207764bf6d7b7172f43c47212682c40b670d5",
+      "unrelatedContentAndFormatHashAfter": "a9ee756454d79a1a971c2505552207764bf6d7b7172f43c47212682c40b670d5"
+    }
+  ],
+  "edgeCases": {
+    "noAnswerNoWrite": true,
+    "movedSourceRejected": true,
+    "rejectedExportNoWrite": true
+  },
+  "finishedUtc": "2026-11-16T10:31:16.861202+00:00"
+}

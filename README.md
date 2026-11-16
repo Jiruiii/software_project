@@ -25,6 +25,8 @@ python app.py
 
 停止程式時，在啟動視窗按 `Ctrl+C`。活動與答案會保存在 `data/classroom.sqlite3`，重新啟動後仍可查看。
 
+不需要建立 `.env`。`.env.example` 僅列出可選的環境變數，程式不會自動讀取 `.env`；一般操作直接在啟動時輸入密碼，Google 設定檔使用下方預設位置即可。
+
 ## 測試一場搶答
 
 1. 老師輸入活動名稱及題號，每行一題，例如 1、2、3，按「建立並進入活動」。
@@ -38,6 +40,8 @@ python app.py
 請開啟新分頁並輸入網址，避免使用「複製分頁」而帶入原分頁的登入身分。
 
 同一活動中，相同小組名稱視為同組。每組每題只能保留第一筆答案，送出後不能修改。搶答成功依伺服器收到答案的先後順序決定，不代表答案已判定正確。
+
+目前採可信課堂模式，組別名稱不是身分驗證；知道活動代碼的人可以輸入相同名稱加入同組。
 
 ## 使用 Google Sheets 學習單
 
@@ -56,6 +60,10 @@ python app.py
 
 教師頁的「首次設定說明」提供完整操作步驟。教師登出或伺服器重新啟動後，需要再次連線 Google。
 
+若你是組員或助教，可依上述步驟建立自己的 Google Cloud 專案與用戶端，將自己的帳號加入自己專案的測試使用者，不必由作者替你開通。也可以使用作者透過非公開管道提供的用戶端設定檔；若該專案仍為測試模式，作者必須先加入你準備授權的帳號。兩種方式都使用你自己的 Google 帳號授權，並寫入你有編輯權限的學習單。
+
+真實 JSON、密碼與授權 token 不可放入公開 repository；下載程式不會附帶這些資料。Google 官方設定參考：[Sheets Python quickstart](https://developers.google.com/workspace/sheets/api/quickstart/python)、[OAuth 同意畫面](https://developers.google.com/workspace/guides/configure-oauth-consent)。
+
 ### 匯入與寫回
 
 1. 開啟[官方單題範本](https://docs.google.com/spreadsheets/d/12uh5xhIx2wXFMy42KU8lN7rLFQ8GDugt9zfAFEvu-1E/copy)，建立自己的副本。
@@ -67,6 +75,8 @@ python app.py
 公開表可直接讀取；私人表及寫回需要老師的 Google 授權。官方原範本僅供試讀，寫回請使用自己的副本。目前支援單題學習單，尚不支援題組。
 
 無人作答的格子保留原值。匯入後若更動題目或列欄，請重新匯入；寫回期間請勿同時編輯原表。
+
+自訂版面可在答案格放完整標記，例如 `{{Q:1}}`。標記會在寫回時被答案取代，因此只靠標記定位的學習單，每輪請使用保留標記的未填寫副本。
 
 ## 自動測試
 
@@ -85,6 +95,21 @@ python tests/run_many_groups.py
 會模擬 30 組、6 題、連續 3 輪，並核對老師與學生畫面。瀏覽器測試需要 Node.js、Chrome，以及可下載測試工具的網路；若只跑服務測試，可使用 `python tests/run_many_groups.py --http-only`。
 
 測試會使用獨立暫存資料，不影響正在使用的活動或 Google 試算表。中文結果位於 `output/playwright/many-groups-summary.txt`。
+
+### 真實 Google Sheets 驗收
+
+完成 Google 首次設定後，雙擊 `test-google-sheets.cmd`，或執行：
+
+```powershell
+python tests/run_live_sheets.py
+```
+
+1. 在自動開啟的瀏覽器完成 Google 授權；不需要先啟動主程式或輸入教師密碼。
+2. 工具會在該帳號建立一份「課間－自動驗收」試算表，複製官方範本並建立不同版面的測試工作表；只修改這份新建表，不改動官方範本或既有活動。
+3. 自動驗證匯入、兩組作答、原位寫回、純文字答案、格式保留、無人作答、重複寫回，以及來源移動後拒絕寫回。
+4. 結果位於 `output/live-sheets/report.json`，測試表連結位於 `output/live-sheets/test-workbook.txt`。測試表保留供人工查看，可自行刪除。
+
+這項測試會實際讀寫 Google，與前面的離線自動測試不同。授權最多等待 10 分鐘；每次執行需要重新授權，權杖只存於記憶體，結束後清除。測試表不會自動公開分享。
 
 ## 常見問題
 
