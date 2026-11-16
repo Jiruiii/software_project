@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from google_sheets import GoogleConnection, SheetsWorkflow, SCOPE
-from guided_notes import SINGLE_TEMPLATE, Grid, from_google
+from guided_notes import SINGLE_TEMPLATE, Grid, from_google, from_xlsx
 from quiz_service import QuizService, QuizError
 from test_guided_notes import single, payload
 
@@ -68,6 +68,19 @@ class SheetsWorkflowTests(unittest.TestCase):
         self.service.review(self.teacher, aid, answer['id'], 'correct')
         self.flow.export(self.teacher, aid)
         self.assertEqual('=SUM(A1:A2)', from_google(self.google.data)[0].value(4,6))
+
+    def test_grouped_import_writeback_and_reimport(self):
+        grid=from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]
+        self.google.data=payload(grid)
+        a=self.imported(); aid=a['id']; student=self.service.join(a['code'],'group')['token']
+        self.service.transition(self.teacher,aid,'active')
+        self.service.submit_unit(student,aid,'1',{'1.1':'first','1.2':'second'},3)
+        self.service.transition(self.teacher,aid,'results')
+        self.assertEqual(2,self.flow.export(self.teacher,aid)['written'])
+        after=from_google(self.google.data)[0]
+        self.assertEqual('first',after.value(4,6)); self.assertEqual('second',after.value(5,6))
+        imported=self.imported()
+        self.assertEqual(['1.1','1.2'],self.service.snapshot(self.teacher,imported['id'])['units'][0]['questions'])
 
     def test_preview_import_privacy_and_atomic_failure(self):
         preview=self.flow.preview(self.teacher,COPY_URL)

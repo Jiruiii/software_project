@@ -19,6 +19,18 @@ def csv_bytes(rows):
 
 
 class ExtraFeatures:
+    def submit_unit(self, token, aid, unit, answers, stake=1):
+        from quiz_service import QuizError, text
+        with self.lock, self.db:
+            self._auth(token, "student", aid); self._activity(aid)
+            if not isinstance(unit, str) or unit not in self._units(aid): raise QuizError(404, "題組不存在。")
+            questions = self._units(aid)[unit]
+            if not isinstance(answers, dict) or set(answers) != set(questions):
+                raise QuizError(400, "請一次填齊此題組的所有子題，不能增加或缺少題號。")
+            clean = {q:text(answers[q], "答案", 2000) for q in questions}
+            received = time.time()
+            return {"answers":[self.submit(token, aid, q, clean[q], stake, _bundle=True, _commit=False, _received=received) for q in questions]}
+
     @staticmethod
     def _unit_points(answers, questions):
         if len(answers) != len(questions): return 0
@@ -263,14 +275,15 @@ class ExtraFeatures:
             if state["phase"] != "results":
                 raise QuizError(409, "請先結束活動再下載紀錄。")
             winners = {r["question_id"]: r["winner"] for r in state["results"]}
+            unit_ids = {q:u["id"] for u in state["units"] for q in u["questions"]}
             rows = [["題號", "題組", "組別", "答案", "收件時間 UTC", "開始後秒數", "原始順位", "搶答成功"]]
             for question in state["questions"]:
                 answers = [a for a in state["answers"] if a["question_id"] == question]
                 if not answers:
-                    rows.append([question, question, "", "無人作答", "", "", "", "否"])
+                    rows.append([question, unit_ids[question], "", "無人作答", "", "", "", "否"])
                 for rank, answer in enumerate(answers, 1):
                     winner = winners[question]
-                    rows.append([question, question, answer["group_name"], answer["text"],
+                    rows.append([question, unit_ids[question], answer["group_name"], answer["text"],
                                  datetime.fromtimestamp(answer["received_at"], timezone.utc).isoformat(),
                                  f"{answer['elapsed_ms']/1000:.3f}", rank,
                                  "是" if winner and winner["group_name"] == answer["group_name"] else "否"])

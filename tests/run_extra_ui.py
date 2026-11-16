@@ -13,11 +13,16 @@ sys.path.insert(0, str(ROOT))
 from app import make_server
 from quiz_service import QuizService
 from google_sheets import GoogleConnection, SheetsWorkflow
+from guided_notes import from_xlsx, parse_grid
 
 
 def main():
     output = ROOT/"output/playwright"; output.mkdir(parents=True, exist_ok=True)
     service = QuizService(":memory:", "extras-test-only")
+    teacher=service.login('extras-test-only')['token']
+    source=parse_grid(from_xlsx((ROOT/'tests/fixtures/grouped.xlsx').read_bytes())[0]); source['spreadsheet_id']='test-grouped-browser-id-1234'
+    service.create_from_source(teacher,'題組驗收',source)
+    service.logout(teacher)
     server = make_server(service, 0, SheetsWorkflow(service, GoogleConnection(ROOT/"tmp/not-configured-extras.json")))
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
     npx = shutil.which("npx.cmd" if os.name == "nt" else "npx")

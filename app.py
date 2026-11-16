@@ -111,9 +111,11 @@ def make_server(service, port=8000, sheets=None):
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
                     return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv|settings|round|review|clusters|reference|report))?", path)
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv|settings|round|review|clusters|reference|report|bundle))?", path)
             if match:
                 aid, action = match.groups()
+                if self.command == "POST" and action == "bundle":
+                    return self.respond(200, service.submit_unit(token, aid, data.get("unit"), data.get("answers"), data.get("stake", 1)))
                 if self.command == "POST" and action == "reference":
                     return self.respond(200, service.reference(token, aid, data.get("question"), data.get("answer")))
                 if self.command == "GET" and action == "report":

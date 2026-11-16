@@ -161,6 +161,8 @@ def parse_grid(grid):
             actual = {(t["question"],t["row"],t["col"]) for t in targets}
             if actual != expected:
                 raise QuizError(400, "佔位符與題號表格不一致；請每題標記正確答案格，或全部使用原表頭定位。")
+            for target, table_target in zip(targets, table_targets):
+                target["unit"] = table_target["unit"]
     else:
         headers = []
         for (row, col), value in grid.cells.items():
@@ -172,34 +174,52 @@ def parse_grid(grid):
         if len(headers) != 1:
             raise QuizError(400, "無法唯一找到「題號／題目／作答」表頭。請確認版面，或在答案格加入 {{Q:題號}}。")
         header, qcol, contentcol, acol = headers[0]
+        parent_ids = set()
         for (row, col), value in sorted(grid.cells.items()):
             if col != qcol or row <= header or not value.strip():
                 continue
             question = value.strip()
+            if question in parent_ids: raise QuizError(400, "學習單題號重複。")
+            parent_ids.add(question)
             if not grid.value(row, contentcol).strip():
                 raise QuizError(400, f"題號 {question} 沒有可辨識的題目列。")
-            if grid.span(row, col)[2] - row > 1:
-                raise QuizError(400, "偵測到題組；同時送出的題組屬 E-09，本次核心版本尚未啟用。請使用單題範本。")
+            parent = grid.span(row, col)
+            if parent[:2] != (row, col): raise QuizError(400, "題號不在合併格起點。")
+            if parent[2] - row > 1:
+                if parent[2] - row > 100: raise QuizError(400, "題組子題數超過 100。")
+                children = list(range(row, parent[2]))
+                markers = [re.fullmatch(r"[（(](\d+)[）)]", grid.value(r, acol).strip()) for r in children]
+                if any(markers) and any(not m or int(m[1]) != i+1 for i,m in enumerate(markers)):
+                    raise QuizError(400, "題組子題標記缺漏、重複或順序不完整。")
+                for i, r in enumerate(children, 1):
+                    span = grid.span(r, acol)
+                    if not grid.value(r, contentcol).strip() or grid.span(r, contentcol)[0] != r:
+                        raise QuizError(400, "題組包含無法辨識的子題列。")
+                    if span[0] != r or span[2] != r+1 or any(span[1] <= c < span[3] for c in (qcol, contentcol)):
+                        raise QuizError(400, "題組答案格無法唯一定位。")
+                    targets.append({"question":f"{question}.{i}", "unit":question, "row":r, "col":span[1]})
+                continue
             span = grid.span(row, acol)
             if span[0] != row or span[2] != row + 1:
                 raise QuizError(400, f"題號 {question} 的答案區跨列，無法唯一定位。")
             if any(span[1] <= c < span[3] for c in (qcol, contentcol)):
                 raise QuizError(400, "答案區與題號或題目重疊，無法安全寫回。")
             if re.fullmatch(r"[（(]\d+[）)]", grid.value(row, acol).strip()):
-                raise QuizError(400, "偵測到題組子題標記；本次不支援 E-09 題組。")
+                raise QuizError(400, "子題標記缺少跨列題組題號。")
             targets.append({"question": question, "row": row, "col": span[1]})
         target_rows = {t["row"] for t in targets}
         for (r,c), value in grid.cells.items():
             if r > header and c == contentcol and value.strip() and r not in target_rows:
                 raise QuizError(400, "有題目列沒有獨立題號，可能是題組；請確認學習單。")
     if not 1 <= len(targets) <= 100:
-        raise QuizError(400, "學習單必須包含 1～100 個可辨識的單題。")
+        raise QuizError(400, "學習單必須包含 1～100 個可辨識的答案格。")
     ids = [t["question"] for t in targets]
     if len(set(ids)) != len(ids) or any(len(q) > 40 for q in ids):
         raise QuizError(400, "學習單題號重複或超過 40 字元。")
     if len({(t["row"],t["col"]) for t in targets}) != len(targets):
         raise QuizError(400, "多個題號對應相同答案格。")
     for target in targets:
+        target.setdefault("unit", target["question"])
         target["cell"] = a1(target["row"], target["col"])
         target["original"] = grid.cells.get((target["row"], target["col"]), "")
     return {"sheet_title": grid.title, "sheet_id": grid.sheet_id, "targets": targets,

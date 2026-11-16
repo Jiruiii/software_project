@@ -170,7 +170,7 @@ class SheetsWorkflow:
             self.previews = {k:v for k,v in self.previews.items() if v["expires"] > time.time()}
             self.previews[key] = {"owner":owner, "source":source, "expires":time.time()+600}
         return {"preview_id":key, "sheet_title":source["sheet_title"], "count":len(source["targets"]),
-                "targets":[{k:t[k] for k in ("question","cell")} for t in source["targets"]],
+                "targets":[{k:t[k] for k in ("question","unit","cell")} for t in source["targets"]],
                 "official_template":sid in PROTECTED_TEMPLATES}
 
     def import_activity(self, token, key, title):

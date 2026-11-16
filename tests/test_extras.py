@@ -4,12 +4,14 @@ import unittest
 import threading
 import tempfile
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from app import make_server
 from quiz_service import QuizError, QuizService
+from guided_notes import from_xlsx, parse_grid
 
 
 class ExtraTests(unittest.TestCase):
@@ -156,6 +158,33 @@ class ExtraTests(unittest.TestCase):
         self.s.reference(self.t, self.aid, "1", "")
         self.assertEqual("", self.s.snapshot(self.u, self.aid)["report"][0]["reference"])
 
+    def test_e09_atomic_bundle_concurrency_and_winner(self):
+        source = parse_grid(from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0])
+        source['spreadsheet_id']='test-copy-grouped-id-1234'
+        a=self.s.create_from_source(self.t,'grouped',source); aid=a['id']
+        students=[self.s.join(a['code'],str(i))['token'] for i in range(20)]
+        self.s.transition(self.t,aid,'active')
+        with self.assertRaises(QuizError): self.s.submit(students[0],aid,'1.1','bypass')
+        for data in ({'1.1':'partial'},{'1.1':'ok','1.2':''},{'1.1':'ok','1.2':'ok','3':'extra'}):
+            with self.assertRaises(QuizError): self.s.submit_unit(students[0],aid,'1',data)
+        self.assertEqual([],self.s.snapshot(self.t,aid)['answers'])
+        def send(pair):
+            i,token=pair
+            return self.s.submit_unit(token,aid,'1',{'1.1':f'A{i}','1.2':f'B{i}'},3)
+        with ThreadPoolExecutor(max_workers=20) as pool: list(pool.map(send,enumerate(students)))
+        before=self.s.snapshot(self.t,aid)['answers']
+        for i in range(0,40,2):
+            self.assertEqual(before[i]['group_id'],before[i+1]['group_id'])
+            self.assertEqual(before[i]['received_at'],before[i+1]['received_at'])
+        send((0,students[0])); self.assertEqual(40,len(self.s.snapshot(self.t,aid)['answers']))
+        self.s.transition(self.t,aid,'results')
+        self.s.review(self.t,aid,before[0]['id'],'incorrect')
+        winners=self.s.snapshot(self.t,aid)['results'][:2]
+        self.assertEqual(before[2]['group_name'],winners[0]['winner']['group_name'])
+        self.assertEqual(winners[0]['winner']['group_name'],winners[1]['winner']['group_name'])
+        source,written=self.s.export_context(self.t,aid)
+        self.assertEqual(before[3]['text'],written['1.2'])
+
     def test_e02_existing_database_migration(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/"old.sqlite3"
@@ -166,12 +195,14 @@ class ExtraTests(unittest.TestCase):
             service.transition(teacher, a["id"], "active"); service.submit(student, a["id"], "1", "preserve")
             service.close()
             db = sqlite3.connect(path)
-            db.executescript("DROP TABLE question_meta; DROP TABLE group_progress; DROP TABLE activity_options;")
+            db.executescript("DROP TABLE question_meta; DROP TABLE group_progress; DROP TABLE activity_options; ALTER TABLE answers DROP COLUMN stake; ALTER TABLE answers DROP COLUMN verdict;")
             db.close()
             service = QuizService(path, "password")
             try:
                 state = service.snapshot(teacher, a["id"])
                 self.assertEqual("preserve", state["answers"][0]["text"])
+                self.assertEqual(1, state['answers'][0]['stake'])
+                self.assertEqual('pending', state['answers'][0]['verdict'])
                 self.assertEqual("all", state["settings"]["mode"])
                 self.assertEqual([{"id":"1", "questions":["1"]}], state["units"])
             finally: service.close()

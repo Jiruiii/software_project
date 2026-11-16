@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app import make_server
 from google_sheets import API, GoogleConnection, SheetsWorkflow, fetch_bytes
-from guided_notes import SINGLE_TEMPLATE, a1
+from guided_notes import SINGLE_TEMPLATE, GROUP_TEMPLATE, a1
 from quiz_service import QuizService, QuizError
 
 OUTPUT = ROOT / "output" / "live-sheets"
@@ -132,6 +132,16 @@ class Acceptance:
                                                           "textFormat": {"bold": True}, "wrapStrategy": "WRAP"}}, "fields": "userEnteredFormat"}},
         ])
         layouts.append(("佔位符測試", 0, {"A": (18, 2), "B": (2, 15)}))
+        template = self.google_request('/' + GROUP_TEMPLATE + '?fields=sheets.properties')
+        source_id = template['sheets'][0]['properties']['sheetId']
+        for title, dr, dc in [('題組原版',0,0),('題組移動列欄',5,2)]:
+            copied = self.google_request(f'/{GROUP_TEMPLATE}/sheets/{source_id}:copyTo', {'destinationSpreadsheetId':self.sid})
+            sheet_id=copied['sheetId']
+            requests=[{'updateSheetProperties':{'properties':{'sheetId':sheet_id,'title':title},'fields':'title'}}]
+            for dimension,count in [('ROWS',dr),('COLUMNS',dc)]:
+                if count: requests.append({'insertDimension':{'range':{'sheetId':sheet_id,'dimension':dimension,'startIndex':0,'endIndex':count},'inheritFromBefore':False}})
+            self.update(requests)
+            layouts.append((title,sheet_id,{q:(r+dr,6+dc) for q,r in [('1.1',4),('1.2',5),('2.1',7),('2.2',8),('3',10),('4',12)]}))
         return layouts
 
     @staticmethod
@@ -153,11 +163,12 @@ class Acceptance:
         self.http(prefix + "/start", {})
         expected = {}
         # Leave the last question unanswered and include an apparent formula.
-        for i, q in enumerate(list(targets)[:-1]):
-            answer = "=1+1" if i == 0 else f"雲端驗收－{title}－{q}"
-            self.http(prefix + "/answers", {"question": q, "answer": answer}, students[i % 2])
-            self.http(prefix + "/answers", {"question": q, "answer": "較晚答案"}, students[(i + 1) % 2])
-            expected[q] = answer
+        units = self.http(prefix)['units']
+        for i, unit in enumerate(units[:-1]):
+            answers={q:('=1+1' if i==0 else f'雲端驗收－{title}－{q}') for q in unit['questions']}
+            self.http(prefix+'/bundle', {'unit':unit['id'],'answers':answers,'stake':3}, students[i%2])
+            self.http(prefix+'/bundle', {'unit':unit['id'],'answers':{q:'較晚答案' for q in unit['questions']}}, students[(i+1)%2])
+            expected.update(answers)
         self.http(prefix + "/end", {})
         teacher = self.http(prefix)
         for student in students:
@@ -196,7 +207,8 @@ class Acceptance:
         prefix = "/api/activities/" + activity["id"]
         student = self.http("/api/join", {"code": activity["code"], "group": "變動測試組"})["token"]
         self.http(prefix + "/start", {})
-        self.http(prefix + "/answers", {"question": next(iter(targets)), "answer": "不應寫入"}, student)
+        unit=self.http(prefix)['units'][0]
+        self.http(prefix + "/bundle", {"unit":unit['id'], "answers":{q:'不應寫入' for q in unit['questions']}}, student)
         self.http(prefix + "/end", {})
         self.update([{"insertDimension": {"range": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": 0, "endIndex": 1}, "inheritFromBefore": False}}])
         before = normalized(self.snapshot())

@@ -79,6 +79,8 @@ class QuizService(ExtraFeatures):
     def create_from_source(self, token, title, source):
         with self.lock, self.db:
             result = self.create(token, title, [t["question"] for t in source["targets"]], _commit=False)
+            self.db.executemany("UPDATE question_meta SET unit_id=? WHERE activity_id=? AND question_id=?",
+                                [(t.get("unit",t["question"]),result["id"],t["question"]) for t in source["targets"]])
             self.db.execute("INSERT INTO sheet_sources(activity_id,source_json) VALUES(?,?)",
                             (result["id"],json.dumps(source,ensure_ascii=False)))
             return result
@@ -215,8 +217,9 @@ class QuizService(ExtraFeatures):
         # Do not expose the global id: gaps would reveal other groups' submissions.
         return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "stake", "verdict")}
 
-    def submit(self, token, aid, question, answer, stake=1):
-        with self.lock, self.db:
+    def submit(self, token, aid, question, answer, stake=1, *, _bundle=False, _commit=True, _received=None):
+        from contextlib import nullcontext
+        with self.lock, self.db if _commit else nullcontext():
             session = self._auth(token, "student", aid)
             activity = self._activity(aid)
             if activity["phase"] != "active":
@@ -225,6 +228,8 @@ class QuizService(ExtraFeatures):
             if type(stake) is not int or not 1 <= stake <= 3:
                 raise QuizError(400, "下注必須是 1～3 的整數。")
             self._submission_gate(activity, session, question)
+            if not _bundle and any(question in qs and len(qs)>1 for qs in self._units(aid).values()):
+                raise QuizError(409, "題組必須一次送出全部子題。")
             if not self.db.execute("SELECT 1 FROM questions WHERE activity_id=? AND id=?",
                                    (aid, question)).fetchone():
                 raise QuizError(404, "題號不存在。")
@@ -234,7 +239,7 @@ class QuizService(ExtraFeatures):
                 if previous["text"] != answer or previous["stake"] != stake:
                     raise QuizError(409, "本組已送出此題，不能修改答案。")
                 return self._own_answer(previous)
-            received = time.time()
+            received = time.time() if _received is None else _received
             elapsed = max(0, round((received - activity["started_at"]) * 1000))
             cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,stake) VALUES(?,?,?,?,?,?,?)",
                                      (aid, question, session["group_id"], answer, received, elapsed, stake))

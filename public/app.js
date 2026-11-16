@@ -131,8 +131,8 @@ $("sheet-preview-form").onsubmit = (event) => {
     $("sheet-preview-title").textContent = `${result.sheet_title} · 共 ${result.count} 題`;
     $("sheet-preview-warning").textContent = result.official_template ? "這是官方原始範本，可用於試讀。若要寫回答案，請先建立自己的副本並重新匯入。" : "請核對題號及答案格。確認後會重新檢查來源，再建立活動。";
     const table = el("table"), head = el("tr"), body = el("tbody"), thead = el("thead");
-    head.append(el("th", "題號"), el("th", "答案儲存格")); thead.append(head);
-    for (const target of result.targets) {const row = el("tr"); row.append(el("td", target.question), el("td", target.cell)); body.append(row);}
+    head.append(el("th", "題號"), el("th", "題組"), el("th", "答案儲存格")); thead.append(head);
+    for (const target of result.targets) {const row = el("tr"); row.append(el("td", target.question), el("td", target.unit), el("td", target.cell)); body.append(row);}
     table.append(thead, body); $("sheet-preview-table").replaceChildren(table);
     $("sheet-activity-title").value = result.sheet_title + "・課堂搶答";
     $("sheet-preview").hidden = false;
@@ -183,55 +183,60 @@ function renderList(items) {
   }
 }
 function renderCards(state) {
-  const key = JSON.stringify([state.id, state.questions]);
-  if (cardsKey === key) return;
-  cardsKey = key; $("student-questions").replaceChildren();
-  state.questions.forEach((q, i) => {
-    const card = el("form", undefined, "question-card"); card.dataset.question = q;
-    const top = el("div", undefined, "question-top"); top.append(el("h3", `第 ${q} 題`), el("span", "尚未送出", "question-status"));
-    const label = el("label", "本組答案"); label.htmlFor = "answer-" + i;
-    const input = el("textarea"); input.id = label.htmlFor; input.maxLength = 2000; input.required = true; input.placeholder = "和組員討論後，在這裡寫下答案…";
-    const saved = el("p", undefined, "saved-answer"); saved.hidden = true;
-    const time = el("p", undefined, "answer-time"); time.hidden = true;
-    const button = el("button", "送出本組答案 →", "primary wide"); button.type = "submit";
-    const stakeLabel = el("label", "信心下注（答對加分、答錯扣分）"), stake = el("select");
-    stake.id = `stake-${i}`; stakeLabel.htmlFor = stake.id; stake.className = "stake";
-    for (const value of [1,2,3]) {const option = el("option", `${value} 分`); option.value = value; stake.append(option);}
-    const draftKey = `classroom.draft.${auth.token}.${state.id}.${q}`; card.dataset.draftKey = draftKey;
-    try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {input.value=draft.answer || ''; stake.value=String(draft.stake || 1);}} catch {sessionStorage.removeItem(draftKey);}
-    const saveDraft=()=>{try {sessionStorage.setItem(draftKey,JSON.stringify({answer:input.value,stake:Number(stake.value)}));} catch {notice('瀏覽器無法保存草稿，重新整理前請先複製答案。');}};
-    input.oninput=saveDraft; stake.onchange=saveDraft;
-    card.append(top, label, input, stakeLabel, stake, saved, time, button);
-    card.onsubmit = (event) => {
-      event.preventDefault(); const requestActivity = activityId;
-      action(button, async () => {
-        pendingAnswers.add(q); updateInputs();
-        try { await api(`/api/activities/${requestActivity}/answers`, {question:q, answer:input.value, stake:Number(stake.value)}); notice(`第 ${q} 題已送出。`, true); }
-        finally { pendingAnswers.delete(q); await refresh(); }
+  const key=JSON.stringify([state.id,state.units]); if (cardsKey===key) return;
+  cardsKey=key; $('student-questions').replaceChildren();
+  state.units.forEach((unit,i)=>{
+    const card=el('form',undefined,'question-card'); card.dataset.question=unit.questions[0]; card.dataset.unit=unit.id;
+    const top=el('div',undefined,'question-top'); top.append(el('h3',`第 ${unit.id} ${unit.questions.length>1?'題組':'題'}`),el('span','尚未送出','question-status')); card.append(top);
+    const inputs={};
+    for (const q of unit.questions) {
+      const field=el('div',undefined,'answer-field'); field.dataset.question=q;
+      const label=el('label',unit.questions.length>1?`子題 ${q} 答案`:'本組答案'), input=el('textarea');
+      input.id=`answer-${state.questions.indexOf(q)}`; label.htmlFor=input.id; input.maxLength=2000; input.required=true;
+      input.placeholder='和組員討論後，在這裡寫下答案…'; inputs[q]=input;
+      const saved=el('p',undefined,'saved-answer'), time=el('p',undefined,'answer-time'); saved.hidden=time.hidden=true;
+      field.append(label,input,saved,time); card.append(field);
+    }
+    const label=el('label','信心下注（題組只計一次分）'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
+    for (const v of [1,2,3]) {const option=el('option',`${v} 分`); option.value=v; stake.append(option);}
+    const button=el('button',unit.questions.length>1?'一次送出整個題組 →':'送出本組答案 →','primary wide'); button.type='submit';
+    card.append(label,stake,button);
+    const draftKey=`classroom.draft.${auth.token}.${state.id}.${unit.id}`; card.dataset.draftKey=draftKey;
+    try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {for (const q of unit.questions) inputs[q].value=draft.answers?.[q] || draft.answer || ''; stake.value=String(draft.stake || 1);}} catch {sessionStorage.removeItem(draftKey);}
+    const saveDraft=()=>{try {sessionStorage.setItem(draftKey,JSON.stringify({answers:Object.fromEntries(unit.questions.map(q=>[q,inputs[q].value])),stake:Number(stake.value)}));} catch {notice('瀏覽器無法保存草稿，重新整理前請先複製答案。');}};
+    for (const input of Object.values(inputs)) input.oninput=saveDraft; stake.onchange=saveDraft;
+    card.onsubmit=event=>{
+      event.preventDefault(); const requestActivity=activityId;
+      action(button,async()=>{
+        pendingAnswers.add(unit.id); updateInputs();
+        try {
+          const grouped=unit.questions.length>1;
+          const data=grouped?{unit:unit.id,answers:Object.fromEntries(unit.questions.map(q=>[q,inputs[q].value])),stake:Number(stake.value)}:
+            {question:unit.questions[0],answer:inputs[unit.questions[0]].value,stake:Number(stake.value)};
+          await api(`/api/activities/${requestActivity}/${grouped?'bundle':'answers'}`,data); notice(`第 ${unit.id} 題已送出。`,true);
+        } finally {pendingAnswers.delete(unit.id); await refresh();}
       });
     };
-    $("student-questions").append(card);
+    $('student-questions').append(card);
   });
 }
 function updateInputs() {
   if (!current) return;
-  $("start").disabled = !connected || $("start").classList.contains("busy");
-  $("end").disabled = !connected || $("end").classList.contains("busy");
-  if (current.role !== "student") return;
-  const answers = new Map(current.answers.map(a => [a.question_id, a]));
-  for (const card of $("student-questions").children) {
-    const answer = answers.get(card.dataset.question), input = card.querySelector("textarea"), button = card.querySelector("button");
-    const disabled = !!answer || !connected || current.phase !== "active" || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.question);
-    input.disabled = disabled; button.disabled = disabled;
-    const stake = card.querySelector('.stake'); stake.disabled = disabled;
-    if (answer) {stake.value = answer.stake; input.value=answer.text; sessionStorage.removeItem(card.dataset.draftKey);}
-    card.classList.toggle("sent", !!answer);
-    card.querySelector(".question-status").textContent = answer ? "✓ 已送出" : "尚未送出";
-    input.hidden = !!answer; button.hidden = !!answer;
-    card.querySelector("label").hidden = !!answer;
-    const saved = card.querySelector(".saved-answer"), time = card.querySelector(".answer-time");
-    saved.hidden = time.hidden = !answer;
-    if (answer) { saved.textContent = answer.text; time.textContent = `已於 ${timeText(answer.received_at)} 送出 · 開始後 ${(answer.elapsed_ms / 1000).toFixed(3)} 秒`; }
+  $('start').disabled=!connected || $('start').classList.contains('busy');
+  $('end').disabled=!connected || $('end').classList.contains('busy');
+  if (current.role!=='student') return;
+  const answers=new Map(current.answers.map(a=>[a.question_id,a]));
+  for (const card of $('student-questions').children) {
+    const fields=[...card.querySelectorAll('.answer-field')], sent=fields.every(f=>answers.has(f.dataset.question));
+    const disabled=sent || !connected || current.phase!=='active' || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.unit);
+    const button=card.querySelector('button'), stake=card.querySelector('.stake'); button.disabled=stake.disabled=disabled; button.hidden=sent;
+    card.classList.toggle('sent',sent); card.querySelector('.question-status').textContent=sent?'✓ 已送出':'尚未送出';
+    if (sent) {stake.value=answers.get(card.dataset.question).stake; sessionStorage.removeItem(card.dataset.draftKey);}
+    for (const field of fields) {
+      const answer=answers.get(field.dataset.question), input=field.querySelector('textarea'); input.disabled=disabled; input.hidden=!!answer;
+      const saved=field.querySelector('.saved-answer'), time=field.querySelector('.answer-time'); saved.hidden=time.hidden=!answer;
+      if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · 開始後 ${(answer.elapsed_ms/1000).toFixed(3)} 秒`;}
+    }
   }
 }
 function renderMonitor(state) {

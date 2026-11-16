@@ -33,8 +33,15 @@ class GuidedNotesTests(unittest.TestCase):
         source = parse_grid(single())
         self.assertEqual([str(i) for i in range(1,7)], [t["question"] for t in source["targets"]])
         self.assertEqual(["G5","G7","G9","G11","G13","G15"], [t["cell"] for t in source["targets"]])
-        with self.assertRaisesRegex(QuizError, "E-09"):
-            parse_grid(from_xlsx((FIXTURES / "grouped.xlsx").read_bytes())[0])
+        grouped = from_xlsx((FIXTURES / "grouped.xlsx").read_bytes())[0]
+        targets = parse_grid(grouped)["targets"]
+        self.assertEqual(['1.1','1.2','2.1','2.2','3','4'], [t['question'] for t in targets])
+        self.assertEqual(['1','1','2','2','3','4'], [t['unit'] for t in targets])
+        self.assertEqual(['G5','G6','G8','G9','G11','G13'], [t['cell'] for t in targets])
+        shifted = Grid(grouped.title, {(r+7,c+2):v for (r,c),v in grouped.cells.items()}, [(r+7,c+2,r2+7,c2+2) for r,c,r2,c2 in grouped.merges])
+        self.assertEqual(['I12','I13','I15','I16','I18','I20'], [t['cell'] for t in parse_grid(shifted)['targets']])
+        grouped.cells[(5,6)] = '(3)'
+        with self.assertRaisesRegex(QuizError, '標記'): parse_grid(grouped)
 
     def test_moved_rows_columns_and_answer_column(self):
         g = single()
