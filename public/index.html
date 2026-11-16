@@ -88,6 +88,7 @@
           <p id="phase-help" class="muted"></p>
           <p id="round-status" class="integration-note" hidden></p>
           <p id="countdown" class="integration-note" hidden></p>
+          <section id="own-score" class="score-card" aria-live="polite" hidden><span>本組目前總分</span><strong id="own-score-total">0 分</strong><p id="own-score-pending"></p><small>只累積本場活動；不押不加不扣，未判定暫不計分。</small></section>
           <form id="settings-form" class="panel" hidden>
             <h3>活動規則</h3><label for="quiz-mode">開放方式</label>
             <select id="quiz-mode"><option value="all">全題同時開放</option><option value="sequential">逐題搶答</option></select>
@@ -95,6 +96,7 @@
             <label for="quiz-duration">作答秒數（0 不限時；逐題模式為每題秒數，含保底時間）</label><input id="quiz-duration" type="number" min="0" max="3600" step="1" value="0" required>
             <button class="primary" type="submit">儲存活動規則</button>
           </form>
+          <section id="question-settings" class="panel" hidden><h3>題型與下注</h3><p class="field-hint">每題可選簡答或單選，並獨立決定是否開放下注。單選自動批改每組，簡答由老師批改；開始後不能修改。題組共用一次下注。</p><div id="question-settings-forms"></div></section>
           <div id="results" hidden></div>
           <section id="scoreboard" class="panel" hidden><h3>小組得分排行</h3><p class="field-hint">每組答對加下注分、答錯扣下注分、未判定 0 分。題組只計一次；同分同名次。</p><div id="scoreboard-table" class="table-scroll"></div></section>
           <section id="references" class="panel" hidden><h3>老師參考答案</h3><p class="field-hint">儲存後會出現在各組報告；不會自動判分。</p><div id="reference-forms"></div></section>

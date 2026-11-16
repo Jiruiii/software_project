@@ -1,5 +1,6 @@
 """Isolated browser acceptance for extensions; does not access Google."""
 import json
+import argparse
 import os
 from pathlib import Path
 import shutil
@@ -17,6 +18,9 @@ from guided_notes import from_xlsx, parse_grid
 
 
 def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--suite',choices=['extras','question-types'],default='extras')
+    suite=parser.parse_args().suite
     output = ROOT/"output/playwright"; output.mkdir(parents=True, exist_ok=True)
     service = QuizService(":memory:", "extras-test-only")
     teacher=service.login('extras-test-only')['token']
@@ -34,16 +38,16 @@ def main():
     try:
         opened = run("open", f"http://127.0.0.1:{server.server_port}")
         if opened.returncode: raise RuntimeError(opened.stdout+opened.stderr)
-        result = run("run-code", "--filename", "tests/browser-extras.js")
-        (output/"extras-browser.log").write_text(result.stdout+result.stderr, encoding="utf-8")
-        if result.returncode or "### Result\n" not in result.stdout: raise RuntimeError("Browser failed; see extras-browser.log")
+        result = run("run-code", "--filename", f"tests/browser-{suite}.js")
+        (output/f"{suite}-browser.log").write_text(result.stdout+result.stderr, encoding="utf-8")
+        if result.returncode or "### Result\n" not in result.stdout: raise RuntimeError(f"Browser failed; see {suite}-browser.log")
         report.update(json.JSONDecoder().raw_decode(result.stdout.split("### Result\n", 1)[1].lstrip())[0])
         print(json.dumps(report, ensure_ascii=True, indent=2))
         return 0 if report["passed"] else 1
     finally:
         run("close")
         server.shutdown(); thread.join(); server.server_close(); service.close()
-        (output/"extras-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        (output/f"{suite}-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__": raise SystemExit(main())

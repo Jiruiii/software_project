@@ -151,6 +151,7 @@ $("sheet-export").onclick = () => action($("sheet-export"), async () => {
   const result = await api(`/api/activities/${activityId}/export`, {}); notice(result.message, true); await refresh();
 });
 for (const kind of ["start", "end"]) $(kind).onclick = () => action($(kind), async () => {
+  if (kind==='start' && document.querySelector('.question-config-form[data-dirty="true"]')) throw new Error('請先儲存尚未儲存的題型與下注設定，再開始搶答。');
   await api(`/api/activities/${activityId}/${kind}`, {}); await refresh();
 });
 
@@ -185,7 +186,7 @@ function renderList(items) {
   }
 }
 function renderCards(state) {
-  const key=JSON.stringify([state.id,state.units]); if (cardsKey===key) return;
+  const key=JSON.stringify([state.id,state.units,state.question_settings]); if (cardsKey===key) return;
   cardsKey=key; $('student-questions').replaceChildren();
   state.units.forEach((unit,i)=>{
     const card=el('form',undefined,'question-card'); card.dataset.question=unit.questions[0]; card.dataset.unit=unit.id;
@@ -193,20 +194,28 @@ function renderCards(state) {
     const inputs={};
     for (const q of unit.questions) {
       const field=el('div',undefined,'answer-field'); field.dataset.question=q;
-      const label=el('label',unit.questions.length>1?`子題 ${q} 答案`:'本組答案'), input=el('textarea');
+      const config=state.question_settings[q], choice=config.type==='choice';
+      const label=el('label',`${unit.questions.length>1?`子題 ${q}`:'本組'}答案（${choice?'單選・自動判分':'簡答・人工批改'}）`), input=el(choice?'select':'textarea');
+      input.className='answer-input';
+      if (choice) {
+        const empty=el('option','請選擇一個答案'); empty.value=''; input.append(empty);
+        config.options.forEach((value,index)=>{const option=el('option',`${String.fromCharCode(65+index)}. ${value}`); option.value=value; input.append(option);});
+      }
       input.id=`answer-${state.questions.indexOf(q)}`; label.htmlFor=input.id; input.maxLength=2000; input.required=true;
       input.placeholder='和組員討論後，在這裡寫下答案…'; inputs[q]=input;
       const saved=el('p',undefined,'saved-answer'), time=el('p',undefined,'answer-time'); saved.hidden=time.hidden=true;
       field.append(label,input,saved,time); card.append(field);
     }
-    const label=el('label','信心下注（題組只計一次分）'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
-    for (const v of [1,2,3]) {const option=el('option',`${v} 分`); option.value=v; stake.append(option);}
+    const betting=state.question_settings[unit.questions[0]].betting_enabled;
+    const label=el('label',betting?'信心下注（可不押，題組只計一次分）':'本題未開放下注'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
+    for (const v of betting?[0,1,2,3]:[0]) {const option=el('option',v===0?'不押（0 分）':`${v} 分`); option.value=v; stake.append(option);}
+    card.dataset.betting=String(betting);
     const button=el('button',unit.questions.length>1?'一次送出整個題組 →':'送出本組答案 →','primary wide'); button.type='submit';
     card.append(label,stake,button);
     const draftKey=`classroom.draft.${auth.token}.${state.id}.${unit.id}`; card.dataset.draftKey=draftKey;
-    try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {for (const q of unit.questions) inputs[q].value=draft.answers?.[q] || draft.answer || ''; stake.value=String(draft.stake || 1);}} catch {sessionStorage.removeItem(draftKey);}
+    try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {for (const q of unit.questions) inputs[q].value=draft.answers?.[q] || draft.answer || ''; stake.value=String(betting?(draft.stake ?? 0):0);}} catch {sessionStorage.removeItem(draftKey);}
     const saveDraft=()=>{try {sessionStorage.setItem(draftKey,JSON.stringify({answers:Object.fromEntries(unit.questions.map(q=>[q,inputs[q].value])),stake:Number(stake.value)}));} catch {notice('瀏覽器無法保存草稿，重新整理前請先複製答案。');}};
-    for (const input of Object.values(inputs)) input.oninput=saveDraft; stake.onchange=saveDraft;
+    for (const input of Object.values(inputs)) {input.oninput=saveDraft; input.onchange=saveDraft;} stake.onchange=saveDraft;
     card.onsubmit=event=>{
       event.preventDefault(); const requestActivity=activityId;
       action(button,async()=>{
@@ -232,12 +241,13 @@ function updateInputs() {
     const fields=[...card.querySelectorAll('.answer-field')], sent=fields.every(f=>answers.has(f.dataset.question));
     const disabled=sent || !connected || current.phase!=='active' || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.unit);
     const button=card.querySelector('button'), stake=card.querySelector('.stake'); button.disabled=stake.disabled=disabled; button.hidden=sent;
+    if (card.dataset.betting==='false') stake.disabled=true;
     card.classList.toggle('sent',sent); card.querySelector('.question-status').textContent=sent?'✓ 已送出':'尚未送出';
     if (sent) {stake.value=answers.get(card.dataset.question).stake; sessionStorage.removeItem(card.dataset.draftKey);}
     for (const field of fields) {
-      const answer=answers.get(field.dataset.question), input=field.querySelector('textarea'); input.disabled=disabled; input.hidden=!!answer;
+      const answer=answers.get(field.dataset.question), input=field.querySelector('.answer-input'); input.disabled=disabled; input.hidden=!!answer;
       const saved=field.querySelector('.saved-answer'), time=field.querySelector('.answer-time'); saved.hidden=time.hidden=!answer;
-      if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · 開始後 ${(answer.elapsed_ms/1000).toFixed(3)} 秒`;}
+      if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · 開始後 ${(answer.elapsed_ms/1000).toFixed(3)} 秒 · ${verdictNames[answer.verdict]} · ${answer.stake===0?'不押':`下注 ${answer.stake} 分`}`;}
     }
   }
 }
@@ -334,6 +344,12 @@ function renderState(state) {
   renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
+  renderQuestionSettings(state);
+  $('own-score').hidden=teacher;
+  if (!teacher) {
+    $('own-score-total').textContent=`${state.own_score.total} 分`;
+    $('own-score-pending').textContent=state.own_score.pending_units?`還有 ${state.own_score.pending_units} 個作答單位等待判定`:'目前已送出答案沒有待判定項目';
+  }
   $('scoreboard').hidden=!ended;
   if (ended && $('scoreboard').dataset.values!==JSON.stringify(state.scoreboard)) {
     $('scoreboard').dataset.values=JSON.stringify(state.scoreboard);
@@ -456,3 +472,51 @@ $("cluster-refresh").onclick = () => action($("cluster-refresh"), async () => {
   }));
 });
 $("cluster-question").onchange = () => {$("cluster-list").replaceChildren(); $("cluster-limit").textContent='請按比較目前答案。';};
+function renderQuestionSettings(state) {
+  const panel=$('question-settings'); panel.hidden=state.role!=='teacher' || state.phase!=='preparing';
+  if (panel.hidden || panel.dataset.activity===state.id) return;
+  panel.dataset.activity=state.id;
+  $('question-settings-forms').replaceChildren(...state.units.map((unit,index)=>{
+    const details=el('details',undefined,'question-config-unit'); details.open=index===0; details.dataset.unit=unit.id;
+    const summary=el('summary',`第 ${unit.id} ${unit.questions.length>1?'題組':'題'}：設定題型與下注`);
+    const form=el('form',undefined,'question-config-form'), fields=el('fieldset'); form.dataset.dirty='false';
+    const betLabel=el('label',undefined,'check-label'), betting=el('input'); betting.type='checkbox'; betting.className='betting-enabled';
+    betting.checked=state.question_settings[unit.questions[0]].betting_enabled;
+    betLabel.append(betting,document.createTextNode('開放信心下注（學生仍可選擇不押）')); fields.append(betLabel);
+    const configs=[];
+    for (const [childIndex,q] of unit.questions.entries()) {
+      const config=state.question_settings[q], box=el('section',undefined,'question-config-child'); box.dataset.question=q;
+      const kind=el('select'), label=el('label',`第 ${q} 題的題型`); kind.id=`question-type-${index}-${childIndex}`; kind.className='question-type'; label.htmlFor=kind.id;
+      for (const [value,title] of [['short','簡答（人工批改）'],['choice','單選（自動判分）']]) {const option=el('option',title); option.value=value; kind.append(option);}
+      kind.value=config.type; box.append(label,kind);
+      const choiceBox=el('div',undefined,'choice-settings'), options=el('textarea'), optionLabel=el('label','選項（每行一個，2～8 個，每個最多 200 字）');
+      options.id=`choice-options-${index}-${childIndex}`; options.className='choice-options'; options.rows=4; options.maxLength=2000; options.value=config.options.join('\n'); optionLabel.htmlFor=options.id;
+      const correct=el('select'), correctLabel=el('label','正確選項（僅老師可見）'); correct.id=`choice-correct-${index}-${childIndex}`; correct.className='choice-correct'; correctLabel.htmlFor=correct.id;
+      const lines=()=>options.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+      const rebuild=(preferred)=>{
+        const old=preferred ?? correct.selectedOptions[0]?.dataset.answer;
+        const empty=el('option','請指定正確選項'); empty.value=''; correct.replaceChildren(empty);
+        lines().forEach((answer,i)=>{const option=el('option',`${String.fromCharCode(65+i)}. ${answer}`); option.value=String(i); option.dataset.answer=answer; correct.append(option);});
+        const found=lines().indexOf(old); correct.value=found<0?'':String(found);
+      };
+      rebuild(config.correct_index===null?undefined:config.options[config.correct_index]);
+      const toggle=()=>{choiceBox.hidden=kind.value!=='choice'; options.required=correct.required=kind.value==='choice'; options.disabled=correct.disabled=kind.value!=='choice';};
+      kind.onchange=toggle; options.oninput=()=>rebuild(); toggle();
+      choiceBox.append(optionLabel,options,correctLabel,correct); box.append(choiceBox); fields.append(box);
+      configs.push({q,kind,lines,correct});
+    }
+    const status=el('p','設定已儲存','field-hint');
+    const dirty=()=>{form.dataset.dirty='true'; status.textContent='尚未儲存';}; form.oninput=dirty; form.onchange=dirty;
+    const button=el('button','儲存本題設定','primary'); button.type='submit'; fields.append(status,button); form.append(fields);
+    form.onsubmit=event=>{
+      event.preventDefault();
+      const questions=configs.map(c=>({question:c.q,type:c.kind.value,options:c.kind.value==='choice'?c.lines():[],correct_index:c.correct.value===''?null:Number(c.correct.value)}));
+      action(button,async()=>{
+        fields.disabled=true;
+        try {await api(`/api/activities/${state.id}/question-settings`,{unit:unit.id,betting_enabled:betting.checked,questions}); form.dataset.dirty='false'; status.textContent='設定已儲存'; notice(`第 ${unit.id} 題設定已儲存。`,true); await refresh();}
+        finally {fields.disabled=false;}
+      });
+    };
+    details.append(summary,form); return details;
+  }));
+}

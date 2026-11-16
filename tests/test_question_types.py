@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
@@ -63,10 +64,12 @@ class QuestionTypeTests(unittest.TestCase):
         source=parse_grid(from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]); source['spreadsheet_id']='fixture-grouped-id-12345'
         a=self.s.create_from_source(self.t,'mixed',source); aid=a['id']; u=self.s.join(a['code'],'A')['token']
         self.s.question_settings(self.t,aid,'1',True,[choice('1.1'),{'question':'1.2','type':'short'}])
+        self.s.question_settings(self.t,aid,'2',True,[choice('2.1'),choice('2.2')])
         before=self.s.snapshot(self.t,aid)['question_settings']
         with self.assertRaises(QuizError): self.s.question_settings(self.t,aid,'1',False,[choice('1.1'),choice('1.2',correct=8)])
         self.assertEqual(before,self.s.snapshot(self.t,aid)['question_settings'])
         self.s.transition(self.t,aid,'active')
+        with self.assertRaises(QuizError): self.s.submit_unit(u,aid,'2',{'2.1':'乙','2.2':'invalid'},3)
         with self.assertRaises(QuizError): self.s.submit_unit(u,aid,'1',{'1.1':'invalid','1.2':'valid'},3)
         self.assertEqual([],self.s.snapshot(self.t,aid)['answers'])
         result=self.s.submit_unit(u,aid,'1',{'1.1':'乙','1.2':'簡答'},3)
@@ -99,6 +102,21 @@ class QuestionTypeTests(unittest.TestCase):
         self.s.transition(self.t,aid,'results'); flow.export(self.t,aid)
         self.assertEqual('=1+1',from_google(google.data)[0].value(4,6))
         self.assertEqual({'stringValue':'=1+1'},google.writes[0][1]['requests'][0]['updateCells']['rows'][0]['values'][0]['userEnteredValue'])
+
+    def test_thirty_groups_choice_scores_and_unique_correct_winner(self):
+        self.s.question_settings(self.t,self.aid,'1',True,[choice()])
+        people=[self.s.join(self.a['code'],f'組{i:02}')['token'] for i in range(30)]
+        self.s.transition(self.t,self.aid,'active')
+        def send(i): return self.s.submit(people[i],self.aid,'1','乙' if i%2==0 else '甲',i%3+1)
+        with ThreadPoolExecutor(max_workers=30) as pool: replies=list(pool.map(send,range(30)))
+        self.assertEqual(15,sum(a['verdict']=='correct' for a in replies))
+        for i,token in enumerate(people):
+            own=self.s.snapshot(token,self.aid)
+            self.assertEqual((i%3+1)*(1 if i%2==0 else -1),own['own_score']['total'])
+            self.assertEqual(1,len(own['answers'])); self.assertNotIn('scoreboard',own)
+        self.s.transition(self.t,self.aid,'results'); state=self.s.snapshot(self.t,self.aid)
+        first=next(a for a in state['answers'] if a['verdict']=='correct')
+        self.assertEqual(first['group_name'],state['results'][0]['winner']['group_name'])
 
     def test_live_own_score_privacy_regrade_and_activity_isolation(self):
         self.s.question_settings(self.t,self.aid,'1',True,[choice()])
