@@ -44,6 +44,7 @@ function showView() {
   $("back").hidden = auth?.role !== "teacher";
 }
 function saveAuth(value) {
+  for (const key of Object.keys(sessionStorage)) if (key.startsWith('classroom.draft.')) sessionStorage.removeItem(key);
   generation++;
   auth = value; activityId = value?.activity_id || null; current = null;
   cardsKey = lastMonitor = lastResults = lastList = "";
@@ -196,6 +197,10 @@ function renderCards(state) {
     const stakeLabel = el("label", "信心下注（答對加分、答錯扣分）"), stake = el("select");
     stake.id = `stake-${i}`; stakeLabel.htmlFor = stake.id; stake.className = "stake";
     for (const value of [1,2,3]) {const option = el("option", `${value} 分`); option.value = value; stake.append(option);}
+    const draftKey = `classroom.draft.${auth.token}.${state.id}.${q}`; card.dataset.draftKey = draftKey;
+    try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {input.value=draft.answer || ''; stake.value=String(draft.stake || 1);}} catch {sessionStorage.removeItem(draftKey);}
+    const saveDraft=()=>{try {sessionStorage.setItem(draftKey,JSON.stringify({answer:input.value,stake:Number(stake.value)}));} catch {notice('瀏覽器無法保存草稿，重新整理前請先複製答案。');}};
+    input.oninput=saveDraft; stake.onchange=saveDraft;
     card.append(top, label, input, stakeLabel, stake, saved, time, button);
     card.onsubmit = (event) => {
       event.preventDefault(); const requestActivity = activityId;
@@ -219,7 +224,7 @@ function updateInputs() {
     const disabled = !!answer || !connected || current.phase !== "active" || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.question);
     input.disabled = disabled; button.disabled = disabled;
     const stake = card.querySelector('.stake'); stake.disabled = disabled;
-    if (answer) stake.value = answer.stake;
+    if (answer) {stake.value = answer.stake; input.value=answer.text; sessionStorage.removeItem(card.dataset.draftKey);}
     card.classList.toggle("sent", !!answer);
     card.querySelector(".question-status").textContent = answer ? "✓ 已送出" : "尚未送出";
     input.hidden = !!answer; button.hidden = !!answer;

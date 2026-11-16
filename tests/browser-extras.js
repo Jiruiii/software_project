@@ -22,13 +22,24 @@ async (page) => {
   check(await student.locator('#answer-1').isDisabled(),'future question enabled');
   await student.locator('#answer-0').fill('測試答案');
   await student.locator('#stake-0').selectOption('3');
+  await student.reload(); await student.waitForFunction(()=>!document.querySelector('#answer-0')?.disabled);
+  check(await student.locator('#answer-0').inputValue()==='測試答案','draft not restored');
+  check(await student.locator('#stake-0').inputValue()==='3','draft stake not restored');
+  await student.route('**/api/activities/*/answers', async route=>{await route.fetch(); await route.abort();});
   await student.locator('.question-card').nth(0).locator('button').click();
-  await student.waitForFunction(()=>document.querySelector('#stake-0').disabled);
+  await student.waitForFunction(()=>document.querySelector('.question-card').classList.contains('sent'));
+  await student.unroute('**/api/activities/*/answers');
   check(await student.locator('#stake-0').inputValue()==='3','stake not preserved');
   await page.locator('#close-round').click();
   await page.locator('#next-round').waitFor({state:'visible'});
   await page.locator('#next-round').click();
   await student.waitForFunction(()=>!document.querySelector('#answer-1').disabled);
+  await student.locator('#answer-1').fill('尚未送出的草稿');
+  await student.route('**/api/**', route=>route.abort());
+  await student.waitForFunction(()=>document.querySelector('#connection').classList.contains('offline'));
+  await student.unroute('**/api/**');
+  await student.waitForFunction(()=>!document.querySelector('#connection').classList.contains('offline'));
+  check(await student.locator('#answer-1').inputValue()==='尚未送出的草稿','reconnect lost draft');
   await page.locator('#close-round').click();
   await student.locator('#results').waitFor({state:'visible'});
   const download=page.waitForEvent('download'); await page.locator('#download-csv').click();
@@ -64,6 +75,8 @@ async (page) => {
   await student.setViewportSize({width:390,height:844});
   check(await student.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile overflow');
   await student.screenshot({path:'output/playwright/extras-student.png',fullPage:true});
+  await student.locator('#logout').click(); await student.locator('#join-form').waitFor({state:'visible'});
+  check(await student.evaluate(()=>!Object.keys(sessionStorage).some(k=>k.startsWith('classroom.draft.'))),'logout retained draft');
   check(!errors.length,errors.join('\n')); await student.close();
-  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05','E-06','E-07'],pageErrors:errors};
+  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05','E-06','E-07','E-08'],pageErrors:errors};
 }
