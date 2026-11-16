@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+data/
+.env
+credentials*.json
+credentials/
+client_secret*.json
+token*.json
+tmp/
+output/
+node_modules/
+.playwright-cli/
+# Local planning attachment; repository requirements are recorded in openspec/.
+/課堂搶答系統_功能清單與進度表_v2 (1).docx
+# Local environments, editor settings and accidental credential variants.
+.venv/
+venv/
+.env.*
+!.env.example
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.pem
+*.key
+google-oauth-client*.json
+.codex/
+.vscode/
