@@ -31,10 +31,22 @@ async (page) => {
   const download=page.waitForEvent('download'); await page.locator('#download-csv').click();
   check((await download).suggestedFilename().endsWith('.csv'),'CSV download missing');
   check(await student.locator('#download-csv').isHidden(),'teacher CSV visible to student');
+  check(await student.locator('#replay').isHidden(),'student replay exposed');
+  const before = await page.evaluate(()=>JSON.stringify(current.answers));
+  await page.locator('#replay-play').click(); await page.locator('#replay-play').click();
+  const paused = await page.locator('#replay-answers').innerText();
+  await page.waitForTimeout(1700);
+  check(await page.locator('#replay-answers').innerText()===paused,'pause failed');
+  await page.locator('#replay-play').click();
+  await page.waitForFunction(()=>document.querySelector('#replay-status').textContent.includes('播放完成'));
+  check((await page.locator('#replay-answers').innerText()).includes('驗收A組：測試答案'),'replay answer missing');
+  await page.locator('#replay-question').selectOption('2'); await page.locator('#replay-reset').click();
+  await page.waitForFunction(()=>document.querySelector('#replay-status').textContent.includes('無成功組別'));
+  check(before===await page.evaluate(()=>JSON.stringify(current.answers)),'replay changed records');
   await page.screenshot({path:'output/playwright/extras-teacher.png',fullPage:true});
   await student.setViewportSize({width:390,height:844});
   check(await student.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile overflow');
   await student.screenshot({path:'output/playwright/extras-student.png',fullPage:true});
   check(!errors.length,errors.join('\n')); await student.close();
-  return {passed:true,features:['E-01','E-02'],pageErrors:errors};
+  return {passed:true,features:['E-01','E-02','E-03'],pageErrors:errors};
 }

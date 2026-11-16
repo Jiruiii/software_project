@@ -257,8 +257,50 @@ function renderResults(state) {
   }
   $("results").replaceChildren(list);
 }
+let replayKey = "", replayFrame = 0, replayElapsed = 0, replayLast = 0, replayRunning = false;
+function resetReplay() {
+  cancelAnimationFrame(replayFrame); replayRunning = false; replayElapsed = 0;
+  $("replay-play").textContent = "播放"; $("replay-answers").replaceChildren();
+  $("replay-status").textContent = "準備播放";
+}
+function replayTick(now) {
+  if (!replayRunning) return;
+  replayElapsed += now - replayLast; replayLast = now;
+  const answers = current.answers.filter(a => a.question_id === $("replay-question").value);
+  // Keep the immutable receipt ordering; cap long gaps for classroom playback.
+  let due = 0, previous = 0, shown = 0;
+  for (const answer of answers) {
+    due += Math.max(400, Math.min(1500, answer.elapsed_ms - previous)); previous = answer.elapsed_ms;
+    if (replayElapsed < due) break;
+    shown++;
+    if ($("replay-answers").children.length < shown)
+      $("replay-answers").append(el("li", `${answer.group_name}：${answer.text} · ${(answer.elapsed_ms/1000).toFixed(3)} 秒`));
+  }
+  if (shown === answers.length) {
+    replayRunning = false; $("replay-play").textContent = "播放";
+    const winner = current.results.find(r => r.question_id === $("replay-question").value)?.winner;
+    $("replay-status").textContent = winner ? `播放完成 · 目前成功組別：${winner.group_name}` : "播放完成 · 無成功組別";
+  } else { $("replay-status").textContent = `已播放 ${shown} / ${answers.length} 筆`; replayFrame = requestAnimationFrame(replayTick); }
+}
+function playReplay() {
+  if (replayRunning) {replayRunning = false; cancelAnimationFrame(replayFrame); $("replay-play").textContent = "繼續播放"; return;}
+  replayRunning = true; replayLast = performance.now(); $("replay-play").textContent = "暫停";
+  replayFrame = requestAnimationFrame(replayTick);
+}
+$("replay-play").onclick = playReplay;
+$("replay-reset").onclick = () => {resetReplay(); playReplay();};
+$("replay-question").onchange = resetReplay;
+function renderReplay(state) {
+  const enabled = state.role === "teacher" && state.phase === "results";
+  $("replay").hidden = !enabled;
+  const key = enabled ? JSON.stringify([state.id, state.answers, state.results]) : "";
+  if (key === replayKey) return;
+  replayKey = key; resetReplay();
+  if (enabled) $("replay-question").replaceChildren(...state.questions.map(q => {const option = el("option", `第 ${q} 題`); option.value = q; return option;}));
+}
 function renderState(state) {
   current = state;
+  renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
   $("session-title").textContent = state.title;

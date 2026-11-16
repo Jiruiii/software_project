@@ -95,6 +95,12 @@
           </form>
           <div id="results" hidden></div>
           <button id="download-csv" class="primary" hidden>下載活動 CSV</button>
+          <section id="replay" class="panel" hidden>
+            <h3>搶答過程重播</h3><label for="replay-question">選擇題號</label><select id="replay-question"></select>
+            <p class="field-hint">依原始收件順序播放，長時間等待會縮短；重播不會修改紀錄。</p>
+            <button id="replay-play" class="primary">播放</button> <button id="replay-reset" class="text-button">從頭重播</button>
+            <p id="replay-status" aria-live="polite"></p><ol id="replay-answers"></ol>
+          </section>
           <div id="student-questions" class="question-grid" hidden></div>
           <div id="teacher-monitor" hidden><div id="monitor-summary" class="monitor-summary"></div><div id="monitor-table" class="table-scroll"></div></div>
         </div>
