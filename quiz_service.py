@@ -228,7 +228,7 @@ class QuizService(ExtraFeatures):
         return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "stake", "verdict")}
 
     @expire_first
-    def submit(self, token, aid, question, answer, stake=1, *, _bundle=False, _commit=True, _received=None):
+    def submit(self, token, aid, question, answer, stake=0, *, _bundle=False, _commit=True, _received=None):
         from contextlib import nullcontext
         with self.lock, self.db if _commit else nullcontext():
             session = self._auth(token, "student", aid)
@@ -236,8 +236,8 @@ class QuizService(ExtraFeatures):
             if activity["phase"] != "active":
                 raise QuizError(409, "目前不在作答階段，答案未送出。")
             question, answer = text(question, "題號", 40), text(answer, "答案", 2000)
-            if type(stake) is not int or not 1 <= stake <= 3:
-                raise QuizError(400, "下注必須是 1～3 的整數。")
+            if type(stake) is not int or not 0 <= stake <= 3:
+                raise QuizError(400, "下注必須是 0～3 的整數；0 表示不押。")
             received = time.time() if _received is None else _received
             self._submission_gate(activity, session, question, received)
             if not _bundle and any(question in qs and len(qs)>1 for qs in self._units(aid).values()):
@@ -245,6 +245,7 @@ class QuizService(ExtraFeatures):
             if not self.db.execute("SELECT 1 FROM questions WHERE activity_id=? AND id=?",
                                    (aid, question)).fetchone():
                 raise QuizError(404, "題號不存在。")
+            verdict = self._answer_verdict(aid, question, answer, stake)
             previous = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND question_id=? AND group_id=?",
                                        (aid, question, session["group_id"])).fetchone()
             if previous:
@@ -252,8 +253,8 @@ class QuizService(ExtraFeatures):
                     raise QuizError(409, "本組已送出此題，不能修改答案。")
                 return self._own_answer(previous)
             elapsed = max(0, round((received - activity["started_at"]) * 1000))
-            cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,stake) VALUES(?,?,?,?,?,?,?)",
-                                     (aid, question, session["group_id"], answer, received, elapsed, stake))
+            cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,stake,verdict) VALUES(?,?,?,?,?,?,?,?)",
+                                     (aid, question, session["group_id"], answer, received, elapsed, stake, verdict))
             return self._own_answer(self.db.execute("SELECT * FROM answers WHERE id=?", (cursor.lastrowid,)).fetchone())
 
     @expire_first

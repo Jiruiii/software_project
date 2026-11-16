@@ -94,13 +94,13 @@ class ExtraTests(unittest.TestCase):
 
     def test_e04_stake_validation_and_immutable_retry(self):
         self.s.transition(self.t, self.aid, "active")
-        for invalid in (0, 4, -1, True, 1.0, "2", None):
+        for invalid in (4, -1, True, 1.0, "2", None):
             with self.assertRaises(QuizError): self.s.submit(self.u, self.aid, "1", "answer", invalid)
         answer = self.s.submit(self.u, self.aid, "1", "answer", 3)
         self.assertEqual(3, answer["stake"])
         self.assertEqual(answer, self.s.submit(self.u, self.aid, "1", "answer", 3))
         with self.assertRaises(QuizError): self.s.submit(self.u, self.aid, "1", "answer", 2)
-        self.assertEqual(1, self.s.submit(self.v, self.aid, "1", "default")["stake"])
+        self.assertEqual(0, self.s.submit(self.v, self.aid, "1", "default")["stake"])
 
     def test_e05_review_replacement_reversal_and_permissions(self):
         self.s.transition(self.t, self.aid, "active")

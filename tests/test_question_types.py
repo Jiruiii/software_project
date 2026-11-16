@@ -1,0 +1,119 @@
+import copy
+import json
+from pathlib import Path
+import sqlite3
+import tempfile
+import threading
+import unittest
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+
+from app import make_server
+from quiz_service import QuizService, QuizError
+from guided_notes import from_xlsx, parse_grid, from_google
+from google_sheets import SheetsWorkflow
+from test_google_sheets import FakeGoogle, COPY_URL
+
+
+def choice(q='1', options=None, correct=1):
+    return {'question':q,'type':'choice','options':options or ['甲','乙','丙'],'correct_index':correct}
+
+
+class QuestionTypeTests(unittest.TestCase):
+    def setUp(self):
+        self.s=QuizService(':memory:','password')
+        self.t=self.s.login('password')['token']; self.a=self.s.create(self.t,'types',['1','2'])
+        self.aid=self.a['id']; self.u=self.s.join(self.a['code'],'A')['token']; self.v=self.s.join(self.a['code'],'B')['token']
+
+    def tearDown(self): self.s.close()
+
+    def test_no_bet_default_switch_and_all_groups_autograded(self):
+        self.s.question_settings(self.t,self.aid,'1',True,[choice()])
+        self.s.question_settings(self.t,self.aid,'2',False,[choice('2')])
+        self.s.transition(self.t,self.aid,'active')
+        wrong=self.s.submit(self.u,self.aid,'1','甲',3)
+        right=self.s.submit(self.v,self.aid,'1','乙',2)
+        self.assertEqual('incorrect',wrong['verdict']); self.assertEqual('correct',right['verdict'])
+        with self.assertRaises(QuizError): self.s.submit(self.u,self.aid,'2','乙',1)
+        no_bet=self.s.submit(self.u,self.aid,'2','乙')
+        self.assertEqual((0,'correct'),(no_bet['stake'],no_bet['verdict']))
+        self.assertEqual(no_bet,self.s.submit(self.u,self.aid,'2','乙',0))
+        with self.assertRaises(QuizError): self.s.submit(self.v,self.aid,'2','偽造選項',0)
+        self.s.transition(self.t,self.aid,'results')
+        state=self.s.snapshot(self.t,self.aid)
+        self.assertEqual('B',state['results'][0]['winner']['group_name'])
+        self.assertEqual([2,-3],[r['score'] for r in state['scoreboard']])
+
+    def test_configuration_validation_stage_and_secret_filter(self):
+        self.s.question_settings(self.t,self.aid,'1',True,[choice()])
+        before=self.s.snapshot(self.t,self.aid)['question_settings']
+        for item in [choice(options=['x']),choice(options=['x','x']),choice(options=[' ','y']),
+                     choice(correct=True),choice(correct=-1),choice(correct=3),
+                     choice(options=['x'*201,'y']), {'question':'1','type':'unknown'}, choice('2')]:
+            with self.assertRaises(QuizError): self.s.question_settings(self.t,self.aid,'1',True,[item])
+        with self.assertRaises(QuizError): self.s.question_settings(self.u,self.aid,'1',True,[choice()])
+        with self.assertRaises(QuizError): self.s.question_settings(self.t,self.aid,'1',1,[choice()])
+        self.assertEqual(before,self.s.snapshot(self.t,self.aid)['question_settings'])
+        student=self.s.snapshot(self.u,self.aid)
+        self.assertNotIn('correct_index',json.dumps(student)); self.assertNotIn('scoreboard',student)
+        self.s.transition(self.t,self.aid,'active')
+        with self.assertRaises(QuizError): self.s.question_settings(self.t,self.aid,'1',False,[choice()])
+
+    def test_mixed_bundle_atomicity_manual_review_and_retry(self):
+        source=parse_grid(from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]); source['spreadsheet_id']='fixture-grouped-id-12345'
+        a=self.s.create_from_source(self.t,'mixed',source); aid=a['id']; u=self.s.join(a['code'],'A')['token']
+        self.s.question_settings(self.t,aid,'1',True,[choice('1.1'),{'question':'1.2','type':'short'}])
+        before=self.s.snapshot(self.t,aid)['question_settings']
+        with self.assertRaises(QuizError): self.s.question_settings(self.t,aid,'1',False,[choice('1.1'),choice('1.2',correct=8)])
+        self.assertEqual(before,self.s.snapshot(self.t,aid)['question_settings'])
+        self.s.transition(self.t,aid,'active')
+        with self.assertRaises(QuizError): self.s.submit_unit(u,aid,'1',{'1.1':'invalid','1.2':'valid'},3)
+        self.assertEqual([],self.s.snapshot(self.t,aid)['answers'])
+        result=self.s.submit_unit(u,aid,'1',{'1.1':'乙','1.2':'簡答'},3)
+        self.assertEqual(['correct','pending'],[a['verdict'] for a in result['answers']])
+        self.assertEqual(result,self.s.submit_unit(u,aid,'1',{'1.1':'乙','1.2':'簡答'},3))
+        self.s.transition(self.t,aid,'results')
+        rows=self.s.snapshot(self.t,aid)['answers']; self.s.review(self.t,aid,rows[1]['id'],'correct')
+        self.assertEqual(3,self.s.snapshot(u,aid)['scoreboard'][0]['score'])
+        self.s.review(self.t,aid,rows[0]['id'],'incorrect')
+        self.assertEqual(-3,self.s.snapshot(u,aid)['scoreboard'][0]['score'])
+
+    def test_legacy_migration_preserves_stakes_and_answers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'legacy.sqlite3'; s=QuizService(path,'pw'); t=s.login('pw')['token']; a=s.create(t,'legacy',['1']); u=s.join(a['code'],'A')['token']
+            s.transition(t,a['id'],'active'); original=s.submit(u,a['id'],'1','保留',3); s.close()
+            db=sqlite3.connect(path)
+            for name in ('question_type','options_json','correct_index','betting_enabled'): db.execute(f'ALTER TABLE question_meta DROP COLUMN {name}')
+            db.commit(); db.close(); s=QuizService(path,'pw')
+            try:
+                self.assertEqual(original,s.snapshot(u,a['id'])['answers'][0])
+                self.assertEqual('short',s.snapshot(t,a['id'])['question_settings']['1']['type'])
+            finally: s.close()
+
+    def test_choice_export_uses_correct_candidate_literal_text(self):
+        google=FakeGoogle(); flow=SheetsWorkflow(self.s,google)
+        preview=flow.preview(self.t,COPY_URL); a=flow.import_activity(self.t,preview['preview_id'],'choice export'); aid=a['id']
+        self.s.question_settings(self.t,aid,'1',True,[choice(options=['錯誤','=1+1'])])
+        auser=self.s.join(a['code'],'A')['token']; buser=self.s.join(a['code'],'B')['token']
+        self.s.transition(self.t,aid,'active'); self.s.submit(auser,aid,'1','錯誤',3); self.s.submit(buser,aid,'1','=1+1',2)
+        self.s.transition(self.t,aid,'results'); flow.export(self.t,aid)
+        self.assertEqual('=1+1',from_google(google.data)[0].value(4,6))
+        self.assertEqual({'stringValue':'=1+1'},google.writes[0][1]['requests'][0]['updateCells']['rows'][0]['values'][0]['userEnteredValue'])
+
+    def test_http_does_not_accept_client_verdict_or_score(self):
+        server=make_server(self.s,0); thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
+        def post(action,data,token):
+            request=Request(f'http://127.0.0.1:{server.server_port}/api/activities/{self.aid}/{action}',
+                            data=json.dumps(data).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+token})
+            with urlopen(request) as response: return json.load(response)
+        try:
+            with self.assertRaises(HTTPError) as error: post('question-settings',{'unit':'1','betting_enabled':True,'questions':[choice()]},self.u)
+            self.assertEqual(403,error.exception.code); error.exception.close()
+            post('question-settings',{'unit':'1','betting_enabled':True,'questions':[choice()]},self.t)
+            self.s.transition(self.t,self.aid,'active')
+            result=post('answers',{'question':'1','answer':'甲','verdict':'correct','score':999,'correct_index':0},self.u)
+            self.assertEqual('incorrect',result['verdict']); self.assertEqual(0,result['stake'])
+        finally: server.shutdown(); thread.join(); server.server_close()
+
+
+if __name__ == '__main__': unittest.main()

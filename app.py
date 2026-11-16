@@ -111,11 +111,13 @@ def make_server(service, port=8000, sheets=None):
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
                     return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv|settings|round|review|clusters|reference|report|bundle))?", path)
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv|settings|round|review|clusters|reference|report|bundle|question-settings))?", path)
             if match:
                 aid, action = match.groups()
+                if self.command == 'POST' and action == 'question-settings':
+                    return self.respond(200, service.question_settings(token, aid, data.get('unit'), data.get('betting_enabled'), data.get('questions')))
                 if self.command == "POST" and action == "bundle":
-                    return self.respond(200, service.submit_unit(token, aid, data.get("unit"), data.get("answers"), data.get("stake", 1)))
+                    return self.respond(200, service.submit_unit(token, aid, data.get("unit"), data.get("answers"), data.get("stake", 0)))
                 if self.command == "POST" and action == "reference":
                     return self.respond(200, service.reference(token, aid, data.get("question"), data.get("answer")))
                 if self.command == "GET" and action == "report":
@@ -135,7 +137,7 @@ def make_server(service, port=8000, sheets=None):
                 if self.command == "POST" and action in ("start", "end"):
                     return self.respond(200, service.transition(token, aid, "active" if action == "start" else "results"))
                 if self.command == "POST" and action == "answers":
-                    return self.respond(200, service.submit(token, aid, data.get("question"), data.get("answer"), data.get("stake", 1)))
+                    return self.respond(200, service.submit(token, aid, data.get("question"), data.get("answer"), data.get("stake", 0)))
                 if self.command == "POST" and action == "export":
                     return self.respond(200, sheets.export(token, aid))
             raise QuizError(404, "找不到此頁面或操作。")

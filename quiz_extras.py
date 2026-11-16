@@ -57,7 +57,7 @@ class ExtraFeatures:
         return scores
 
     @expire_first
-    def submit_unit(self, token, aid, unit, answers, stake=1):
+    def submit_unit(self, token, aid, unit, answers, stake=0):
         from quiz_service import QuizError, text
         with self.lock, self.db:
             self._auth(token, "student", aid); self._activity(aid)
@@ -162,7 +162,56 @@ class ExtraFeatures:
             self.db.execute("ALTER TABLE answers ADD COLUMN stake INTEGER NOT NULL DEFAULT 1")
         if "verdict" not in columns:
             self.db.execute("ALTER TABLE answers ADD COLUMN verdict TEXT NOT NULL DEFAULT 'pending'")
+        columns = {r['name'] for r in self.db.execute('PRAGMA table_info(question_meta)')}
+        for name, definition in [('question_type', "TEXT NOT NULL DEFAULT 'short'"),
+                                 ('options_json', "TEXT NOT NULL DEFAULT '[]'"),
+                                 ('correct_index', 'INTEGER'),
+                                 ('betting_enabled', 'INTEGER NOT NULL DEFAULT 1')]:
+            if name not in columns:
+                self.db.execute(f'ALTER TABLE question_meta ADD COLUMN {name} {definition}')
         self.db.commit()
+
+    def question_settings(self, token, aid, unit, betting_enabled, questions):
+        from quiz_service import QuizError, text
+        with self.lock, self.db:
+            self._auth(token, 'teacher')
+            if self._activity(aid)['phase'] != 'preparing':
+                raise QuizError(409, '活動開始後不能修改題型、正解或下注開關。')
+            units = self._units(aid)
+            if not isinstance(unit, str) or unit not in units: raise QuizError(404, '題組不存在。')
+            if type(betting_enabled) is not bool: raise QuizError(400, '請提供下注開關。')
+            if not isinstance(questions, list) or len(questions) != len(units[unit]):
+                raise QuizError(400, '請提供該單位全部子題設定。')
+            clean = {}
+            for item in questions:
+                if not isinstance(item, dict) or not isinstance(item.get('question'), str):
+                    raise QuizError(400, '題目設定格式不正確。')
+                q, kind = item['question'], item.get('type')
+                if q not in units[unit] or q in clean or kind not in ('short', 'choice'):
+                    raise QuizError(400, '題號重複、不屬於此題組或題型無效。')
+                options, correct = [], None
+                if kind == 'choice':
+                    options, correct = item.get('options'), item.get('correct_index')
+                    if not isinstance(options, list) or not 2 <= len(options) <= 8:
+                        raise QuizError(400, '單選題需要 2～8 個選項。')
+                    options = [text(option, '選項', 200) for option in options]
+                    if len(set(options)) != len(options): raise QuizError(400, '選項不能重複。')
+                    if type(correct) is not int or not 0 <= correct < len(options):
+                        raise QuizError(400, '請指定一個有效的正確選項。')
+                clean[q] = (kind, json.dumps(options, ensure_ascii=False), correct, int(betting_enabled), aid, q)
+            self.db.executemany('UPDATE question_meta SET question_type=?,options_json=?,correct_index=?,betting_enabled=? WHERE activity_id=? AND question_id=?', clean.values())
+            return {'ok': True}
+
+    def _answer_verdict(self, aid, question, answer, stake):
+        from quiz_service import QuizError
+        config=self.db.execute('SELECT * FROM question_meta WHERE activity_id=? AND question_id=?',(aid,question)).fetchone()
+        if not config: raise QuizError(404, '題號不存在。')
+        if not config['betting_enabled'] and stake != 0:
+            raise QuizError(400, '這題未開放下注，請選擇不押。')
+        if config['question_type'] == 'short': return 'pending'
+        options=json.loads(config['options_json'])
+        if answer not in options: raise QuizError(400, '請選擇題目提供的有效選項。')
+        return 'correct' if answer == options[config['correct_index']] else 'incorrect'
 
     def _winner_rows(self, aid):
         """Earliest complete unit not disqualified; one group wins every child."""
@@ -292,6 +341,11 @@ class ExtraFeatures:
             raise QuizError(409, "目前是保底先答時間，請等待倒數結束。")
 
     def _extra_snapshot(self, state, session):
+        state['question_settings'] = {}
+        for row in self.db.execute('SELECT * FROM question_meta WHERE activity_id=?', (state['id'],)):
+            config={'type':row['question_type'], 'options':json.loads(row['options_json']), 'betting_enabled':bool(row['betting_enabled'])}
+            if session['role'] == 'teacher': config['correct_index'] = row['correct_index']
+            state['question_settings'][row['question_id']] = config
         options = self._options(state["id"])
         units = self._units(state["id"])
         state["units"] = [{"id": u, "questions": qs} for u, qs in units.items()]
