@@ -1,7 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const phaseNames = {preparing: "準備中", active: "作答中", results: "結果"};
-const verdictNames = {pending:"未判定", correct:"正確", incorrect:"錯誤"};
+const verdictNames = {pending:"未判定", correct:"正確", incorrect:"錯誤", unanswered:"未作答"};
 let auth = null, activityId = null, current = null, generation = 0;
 let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", lastResults = "", lastList = "";
 const pendingAnswers = new Set();
@@ -322,6 +322,7 @@ function renderState(state) {
   renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
+  renderReport(state);
   $("classification").hidden = !teacher;
   if ($("classification").dataset.activity !== state.id) {
     $("classification").dataset.activity = state.id; $("cluster-list").replaceChildren(); $("cluster-limit").textContent = '';
@@ -395,6 +396,32 @@ async function refresh() {
 }
 async function poll() {await refresh(); setTimeout(poll, 700);}
 showView(); connection(true); poll();
+let reportKey = '';
+$("download-report").onclick = () => action($("download-report"),()=>downloadFile(`/api/activities/${activityId}/report`, '本組學習報告.csv'));
+function renderReport(state) {
+  const ended=state.phase==='results', teacher=state.role==='teacher';
+  $('references').hidden=!ended || !teacher; $('group-report').hidden=!ended || teacher;
+  if (!ended) return;
+  if (teacher) {
+    if ($('references').dataset.activity !== state.id) {
+      $('references').dataset.activity=state.id;
+      $('reference-forms').replaceChildren(...state.questions.map((q,i)=>{
+        const form=el('form'), label=el('label',`第 ${q} 題參考答案`), input=el('textarea'), button=el('button','儲存參考答案','primary');
+        input.id=`reference-${i}`; label.htmlFor=input.id; input.maxLength=2000; input.value=state.references[q];
+        form.append(label,input,button);
+        form.onsubmit=event=>{event.preventDefault(); action(button,async()=>{await api(`/api/activities/${state.id}/reference`,{question:q,answer:input.value}); notice('參考答案已儲存。',true); await refresh();});};
+        return form;
+      }));
+    }
+  } else {
+    const key=JSON.stringify([state.id,state.report]); if (key===reportKey) return; reportKey=key;
+    const table=el('table'), head=el('tr');
+    for (const title of ['題號','本組答案','判定','下注','單位得分','搶答成功','參考答案']) head.append(el('th',title));
+    table.append(head);
+    for (const r of state.report) {const row=el('tr'); for (const value of [r.question,r.answer,verdictNames[r.verdict],r.stake??'—',r.points??'同題組',r.successful?'是':'否',r.reference||'老師尚未填寫']) row.append(el('td',value)); table.append(row);}
+    $('report-table').replaceChildren(table);
+  }
+}
 $("cluster-refresh").onclick = () => action($("cluster-refresh"), async () => {
   const id = activityId, question = $("cluster-question").value;
   const result = await api(`/api/activities/${id}/clusters`, {question});

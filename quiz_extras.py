@@ -19,6 +19,51 @@ def csv_bytes(rows):
 
 
 class ExtraFeatures:
+    @staticmethod
+    def _unit_points(answers, questions):
+        if len(answers) != len(questions): return 0
+        if any(a["verdict"] == "incorrect" for a in answers): return -answers[0]["stake"]
+        if all(a["verdict"] == "correct" for a in answers): return answers[0]["stake"]
+        return 0
+
+    def reference(self, token, aid, question, answer):
+        from quiz_service import QuizError
+        with self.lock, self.db:
+            self._auth(token, "teacher")
+            if self._activity(aid)["phase"] != "results": raise QuizError(409, "請先結束活動再填寫參考答案。")
+            if not isinstance(answer, str) or len(answer) > 2000: raise QuizError(400, "參考答案最多 2000 字。")
+            if not isinstance(question, str): raise QuizError(400, "請提供題號。")
+            cursor = self.db.execute("UPDATE question_meta SET reference_answer=? WHERE activity_id=? AND question_id=?", (answer.strip(), aid, question))
+            if not cursor.rowcount: raise QuizError(404, "題號不存在。")
+            return {"ok":True}
+
+    def _report(self, state):
+        answers = {a["question_id"]:a for a in state["answers"]}
+        winners = {r["question_id"]:r["winner"] for r in state["results"]}
+        rows = []
+        for unit in state["units"]:
+            qs = unit["questions"]
+            points = self._unit_points([answers[q] for q in qs if q in answers], qs)
+            for index, q in enumerate(qs):
+                answer = answers.get(q)
+                rows.append({"question":q, "unit":unit["id"], "answer":answer["text"] if answer else "未作答",
+                             "verdict":answer["verdict"] if answer else "unanswered", "stake":answer["stake"] if answer else None,
+                             "points":points if index == 0 else None,
+                             "successful":bool(winners[q] and winners[q]["group_name"] == state["group_name"]),
+                             "reference":state["references"][q]})
+        return rows
+
+    def report_csv(self, token, aid):
+        from quiz_service import QuizError
+        with self.lock:
+            self._auth(token, "student", aid)
+            state = self.snapshot(token, aid)
+            if state["phase"] != "results": raise QuizError(409, "請等活動結束再查看報告。")
+            names = {"pending":"未判定", "correct":"正確", "incorrect":"錯誤", "unanswered":"未作答"}
+            rows = [["活動", "組別", "題號", "題組", "本組答案", "判定", "下注", "單位得分（每題組只列一次）", "搶答成功", "參考答案"]]
+            rows.extend([[state["title"], state["group_name"], r["question"], r["unit"], r["answer"], names[r["verdict"]], r["stake"], r["points"], "是" if r["successful"] else "否", r["reference"]] for r in state["report"]])
+            return csv_bytes(rows)
+
     def clusters(self, token, aid, question):
         from quiz_service import QuizError
         with self.lock:
@@ -205,6 +250,9 @@ class ExtraFeatures:
         state["available_questions"] = available
         if session["role"] == "teacher":
             state["reviewable_questions"] = [q for q in state["questions"] if self._reviewable(state, q)]
+        if state["phase"] == "results":
+            state["references"] = {r["question_id"]:r["reference_answer"] for r in self.db.execute("SELECT question_id,reference_answer FROM question_meta WHERE activity_id=?", (state["id"],))}
+            if session["role"] == "student": state["report"] = self._report(state)
         return state
 
     def activity_csv(self, token, aid):

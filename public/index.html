@@ -94,6 +94,8 @@
             <button class="primary" type="submit">儲存活動規則</button>
           </form>
           <div id="results" hidden></div>
+          <section id="references" class="panel" hidden><h3>老師參考答案</h3><p class="field-hint">儲存後會出現在各組報告；不會自動判分。</p><div id="reference-forms"></div></section>
+          <section id="group-report" class="panel" hidden><h3>本組學習報告</h3><p class="field-hint">正確加下注分、錯誤扣下注分、未判定 0 分。題組只計一次，得分列於第一小題。</p><div id="report-table" class="table-scroll"></div><button id="download-report" class="primary">下載本組報告 CSV</button></section>
           <button id="download-csv" class="primary" hidden>下載活動 CSV</button>
           <section id="replay" class="panel" hidden>
             <h3>搶答過程重播</h3><label for="replay-question">選擇題號</label><select id="replay-question"></select>

@@ -134,6 +134,28 @@ class ExtraTests(unittest.TestCase):
         with self.assertRaises(QuizError): self.s.clusters(self.u, self.aid, "1")
         with self.assertRaises(QuizError): self.s.clusters(self.t, self.aid, "unknown")
 
+    def test_e07_private_report_references_and_score(self):
+        for fn,args in [(self.s.report_csv,(self.u,self.aid)),(self.s.reference,(self.t,self.aid,"1","reference"))]:
+            with self.assertRaises(QuizError): fn(*args)
+        self.s.transition(self.t, self.aid, "active")
+        self.s.submit(self.u, self.aid, "1", "own answer", 3)
+        self.s.submit(self.v, self.aid, "1", "other secret", 2)
+        self.s.transition(self.t, self.aid, "results")
+        answer = self.s.snapshot(self.t, self.aid)["answers"][0]
+        self.s.review(self.t, self.aid, answer["id"], "incorrect")
+        self.s.reference(self.t, self.aid, "1", "=reference")
+        report = self.s.snapshot(self.u, self.aid)["report"]
+        self.assertEqual(-3, report[0]["points"])
+        self.assertEqual("=reference", report[0]["reference"])
+        self.assertEqual("unanswered", report[1]["verdict"])
+        raw = self.s.report_csv(self.u, self.aid).decode("utf-8-sig")
+        self.assertIn("own answer", raw); self.assertNotIn("other secret", raw); self.assertIn("'=reference", raw)
+        with self.assertRaises(QuizError): self.s.reference(self.u, self.aid, "1", "bad")
+        other = self.s.create(self.t, "other", ["1"])
+        with self.assertRaises(QuizError): self.s.report_csv(self.u, other["id"])
+        self.s.reference(self.t, self.aid, "1", "")
+        self.assertEqual("", self.s.snapshot(self.u, self.aid)["report"][0]["reference"])
+
     def test_e02_existing_database_migration(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/"old.sqlite3"

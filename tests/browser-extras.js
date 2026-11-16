@@ -53,10 +53,17 @@ async (page) => {
   await page.locator('#cluster-refresh').click();
   await page.waitForFunction(()=>document.querySelector('#cluster-list').textContent.includes('驗收A組：測試答案'));
   check(await student.locator('#classification').isHidden(),'student clusters exposed');
+  await page.locator('#reference-0').fill('老師提供的參考答案');
+  await page.locator('#reference-forms form').first().locator('button').click();
+  await student.waitForFunction(()=>document.querySelector('#report-table').textContent.includes('老師提供的參考答案'));
+  check((await student.locator('#report-table').innerText()).includes('正確'),'report verdict missing');
+  const reportDownload=student.waitForEvent('download'); await student.locator('#download-report').click();
+  check((await reportDownload).suggestedFilename().endsWith('.csv'),'report download missing');
+  check(await student.locator('#references').isHidden(),'student reference editing exposed');
   await page.screenshot({path:'output/playwright/extras-teacher.png',fullPage:true});
   await student.setViewportSize({width:390,height:844});
   check(await student.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile overflow');
   await student.screenshot({path:'output/playwright/extras-student.png',fullPage:true});
   check(!errors.length,errors.join('\n')); await student.close();
-  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05','E-06'],pageErrors:errors};
+  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05','E-06','E-07'],pageErrors:errors};
 }
