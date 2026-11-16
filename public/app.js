@@ -332,6 +332,13 @@ function renderState(state) {
   renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
+  $('scoreboard').hidden=!ended;
+  if (ended && $('scoreboard').dataset.values!==JSON.stringify(state.scoreboard)) {
+    $('scoreboard').dataset.values=JSON.stringify(state.scoreboard);
+    const table=el('table'), head=el('tr'); head.append(el('th','名次'),el('th','組別'),el('th','總分')); table.append(head);
+    for (const score of state.scoreboard) {const row=el('tr'); row.append(el('td',score.rank),el('th',score.group_name),el('td',score.score)); table.append(row);}
+    $('scoreboard-table').replaceChildren(table);
+  }
   renderReport(state);
   $("classification").hidden = !teacher;
   if ($("classification").dataset.activity !== state.id) {

@@ -185,12 +185,14 @@ async (page) => {
   await page.getByRole('button',{name:'題組學生 第 1.2 題判為正確',exact:true}).click();
   stage='line 96';
   await student.waitForFunction(()=>current.report[0].points===2 && current.report[1].points===null);
+  await student.waitForFunction(()=>current.scoreboard[0].score===2);
+  check((await student.locator('#scoreboard-table').innerText()).includes('題組學生'),'scoreboard absent');
   stage='line 97';
   await page.screenshot({path:'output/playwright/extras-grouped-teacher.png',fullPage:true});
   stage='line 98';
   await student.screenshot({path:'output/playwright/extras-grouped-student.png',fullPage:true});
   stage='line 99';
   check(!errors.length,errors.join('\n')); await student.close();
-  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05','E-06','E-07','E-08','E-09'],pageErrors:errors};
+  return {passed:true,features:['E-01','E-02','E-03','E-04','E-05','E-06','E-07','E-08','E-09','E-10'],pageErrors:errors};
   } catch (error) {throw new Error(stage+': '+error.message);}
 }

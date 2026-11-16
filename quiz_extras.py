@@ -19,6 +19,23 @@ def csv_bytes(rows):
 
 
 class ExtraFeatures:
+    def _scoreboard(self, aid):
+        units = self._units(aid)
+        answers = {}
+        for row in self.db.execute('SELECT * FROM answers WHERE activity_id=? ORDER BY id', (aid,)):
+            answers.setdefault(row['group_id'], {})[row['question_id']] = dict(row)
+        scores = []
+        for group in self.db.execute('SELECT id,name FROM groups WHERE activity_id=?', (aid,)):
+            own=answers.get(group['id'], {})
+            score=sum(self._unit_points([own[q] for q in qs if q in own], qs) for qs in units.values())
+            scores.append({'group_name':group['name'], 'score':score})
+        scores.sort(key=lambda row:(-row['score'],row['group_name'].casefold(),row['group_name']))
+        last_score,rank=None,0
+        for i,row in enumerate(scores,1):
+            if row['score'] != last_score: rank=i
+            last_score=row['score']; row['rank']=rank
+        return scores
+
     def submit_unit(self, token, aid, unit, answers, stake=1):
         from quiz_service import QuizError, text
         with self.lock, self.db:
@@ -263,6 +280,7 @@ class ExtraFeatures:
         if session["role"] == "teacher":
             state["reviewable_questions"] = [q for q in state["questions"] if self._reviewable(state, q)]
         if state["phase"] == "results":
+            state["scoreboard"] = self._scoreboard(state['id'])
             state["references"] = {r["question_id"]:r["reference_answer"] for r in self.db.execute("SELECT question_id,reference_answer FROM question_meta WHERE activity_id=?", (state["id"],))}
             if session["role"] == "student": state["report"] = self._report(state)
         return state

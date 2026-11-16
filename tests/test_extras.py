@@ -185,6 +185,21 @@ class ExtraTests(unittest.TestCase):
         source,written=self.s.export_context(self.t,aid)
         self.assertEqual(before[3]['text'],written['1.2'])
 
+    def test_e10_scores_ties_negative_and_regrade(self):
+        self.s.join(self.a['code'],'C')
+        self.s.transition(self.t,self.aid,'active')
+        self.s.submit(self.u,self.aid,'1','A',3); self.s.submit(self.v,self.aid,'1','B',3)
+        self.assertNotIn('scoreboard',self.s.snapshot(self.u,self.aid))
+        self.s.transition(self.t,self.aid,'results')
+        state=self.s.snapshot(self.t,self.aid); ids=[a['id'] for a in state['answers']]
+        self.assertEqual([1,1,1],[r['rank'] for r in state['scoreboard']])
+        for aid in ids: self.s.review(self.t,self.aid,aid,'correct')
+        state=self.s.snapshot(self.v,self.aid)
+        self.assertEqual([3,3,0],[r['score'] for r in state['scoreboard']])
+        self.assertEqual([1,1,3],[r['rank'] for r in state['scoreboard']])
+        self.s.review(self.t,self.aid,ids[0],'incorrect'); self.s.review(self.t,self.aid,ids[0],'incorrect')
+        self.assertEqual([3,0,-3],[r['score'] for r in self.s.snapshot(self.u,self.aid)['scoreboard']])
+
     def test_e02_existing_database_migration(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder)/"old.sqlite3"
