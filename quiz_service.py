@@ -224,10 +224,12 @@ class QuizService(ExtraFeatures):
                 self.db.execute('UPDATE activity_options SET deadline=? WHERE activity_id=?', (time.time()+duration if target=='active' and duration else None,aid))
             return {"phase": target}
 
-    @staticmethod
-    def _own_answer(row):
+    def _own_answer(self, row, activity=None):
         # Do not expose the global id: gaps would reveal other groups' submissions.
-        return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "elapsed_basis", "stake", "verdict")}
+        answer = {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "elapsed_basis", "stake", "verdict")}
+        if activity is not None and not self._reviewable(activity, row['question_id']):
+            answer['verdict'] = 'withheld'
+        return answer
 
     @expire_first
     def submit(self, token, aid, question, answer, stake=0, *, _bundle=False, _commit=True, _received=None):
@@ -253,13 +255,13 @@ class QuizService(ExtraFeatures):
             if previous:
                 if previous["text"] != answer or previous["stake"] != stake:
                     raise QuizError(409, "本組已送出此題，不能修改答案。")
-                return self._own_answer(previous)
+                return self._own_answer(previous, activity)
             opened = self.db.execute('SELECT opened_at FROM question_meta WHERE activity_id=? AND question_id=?', (aid, question)).fetchone()['opened_at']
             basis = 'question' if opened is not None else 'activity'
             elapsed = max(0, round((received - (opened if opened is not None else activity["started_at"])) * 1000))
             cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,elapsed_basis,stake,verdict) VALUES(?,?,?,?,?,?,?,?,?)",
                                      (aid, question, session["group_id"], answer, received, elapsed, basis, stake, verdict))
-            return self._own_answer(self.db.execute("SELECT * FROM answers WHERE id=?", (cursor.lastrowid,)).fetchone())
+            return self._own_answer(self.db.execute("SELECT * FROM answers WHERE id=?", (cursor.lastrowid,)).fetchone(), activity)
 
     @expire_first
     def snapshot(self, token, aid):
@@ -282,7 +284,7 @@ class QuizService(ExtraFeatures):
             else:
                 group = self.db.execute("SELECT name FROM groups WHERE id=?", (session["group_id"],)).fetchone()
                 activity["group_name"] = group["name"]
-                activity["answers"] = [self._own_answer(r) for r in self.db.execute(
+                activity["answers"] = [self._own_answer(r, activity) for r in self.db.execute(
                     "SELECT * FROM answers WHERE activity_id=? AND group_id=? ORDER BY id", (aid, session["group_id"]))]
             if activity["phase"] == "results":
                 winners = {}

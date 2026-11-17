@@ -1,7 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const phaseNames = {preparing: "準備中", active: "作答中", results: "結果"};
-const verdictNames = {pending:"未判定", correct:"正確", incorrect:"錯誤", unanswered:"未作答"};
+const verdictNames = {pending:"未判定", withheld:"待關題公布", correct:"正確", incorrect:"錯誤", unanswered:"未作答"};
 let auth = null, activityId = null, current = null, generation = 0;
 let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", lastResults = "", lastList = "";
 const pendingAnswers = new Set();
@@ -365,7 +365,10 @@ function renderState(state) {
   $('own-score').hidden=teacher;
   if (!teacher) {
     $('own-score-total').textContent=`${state.own_score.total} 分`;
-    $('own-score-pending').textContent=state.own_score.pending_units?`還有 ${state.own_score.pending_units} 個作答單位等待判定`:'目前已送出答案沒有待判定項目';
+    const waiting=[];
+    if(state.own_score.awaiting_close_units) waiting.push(`${state.own_score.awaiting_close_units} 個作答單位待關題公布`);
+    if(state.own_score.pending_units) waiting.push(`${state.own_score.pending_units} 個已關題作答單位等待批改`);
+    $('own-score-pending').textContent=waiting.length?waiting.join('；'):'目前沒有待公布或待批改項目';
   }
   $('scoreboard').hidden=!ended;
   if (ended && $('scoreboard').dataset.values!==JSON.stringify(state.scoreboard)) {

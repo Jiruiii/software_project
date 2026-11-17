@@ -43,10 +43,20 @@ async (page) => {
     check(await a.locator('#stake-0').inputValue()==='0','zero draft became a stake');
     await a.locator('#stake-0').selectOption('3'); await a.locator('.question-card').nth(0).locator('button').click();
     await b.locator('#answer-0').selectOption('乙'); await b.locator('#stake-0').selectOption('2'); await b.locator('.question-card').nth(0).locator('button').click();
-    await a.waitForFunction(()=>current.own_score.total===-3); await b.waitForFunction(()=>current.own_score.total===2);
+    for(const student of [a,b]) {
+      await student.waitForFunction(()=>current.answers.length===1);
+      check(await student.evaluate(()=>current.own_score.total===0 && current.own_score.awaiting_close_units===1 && current.own_score.pending_units===0 && current.answers[0].verdict==='withheld'),'Open question leaked grading');
+      check((await student.locator('#own-score-pending').innerText()).includes('待關題公布'),'Missing withheld hint');
+    }
+    await a.setViewportSize({width:390,height:844});
+    await a.screenshot({path:'output/playwright/score-publication-before-close.png',fullPage:true});
     check(await a.locator('#scoreboard').isHidden(),'active scoreboard exposed');
     check(await a.evaluate(()=>!current.answers.some(x=>x.text==='乙')&&!('groups' in current)),'other group answer exposed');
-    stage='choice no betting'; await page.locator('#close-round').click(); await page.locator('#next-round').click();
+    stage='choice no betting'; await page.locator('#close-round').click();
+    await a.waitForFunction(()=>current.own_score.total===-3 && current.answers[0].verdict==='incorrect');
+    await b.waitForFunction(()=>current.own_score.total===2 && current.answers[0].verdict==='correct');
+    await a.screenshot({path:'output/playwright/score-publication-after-close.png',fullPage:true});
+    await page.locator('#next-round').click();
     await a.waitForFunction(()=>!document.querySelector('#answer-1').disabled);
     check(await a.locator('#stake-1').isDisabled(),'closed betting selectable');
     await a.locator('#answer-1').selectOption('乙'); await a.locator('.question-card').nth(1).locator('button').click();
@@ -54,9 +64,10 @@ async (page) => {
     stage='short answer manual grading'; await page.locator('#close-round').click(); await page.locator('#next-round').click();
     await a.waitForFunction(()=>!document.querySelector('#answer-2').disabled);
     await a.locator('#answer-2').fill('人工批改答案'); await a.locator('#stake-2').selectOption('2'); await a.locator('.question-card').nth(2).locator('button').click();
-    await a.waitForFunction(()=>current.own_score.pending_units===1);
+    await a.waitForFunction(()=>current.own_score.awaiting_close_units===1 && current.answers.length===3);
     check(await a.evaluate(()=>current.own_score.total===-3),'pending added score');
     await page.locator('#close-round').click();
+    await a.waitForFunction(()=>current.own_score.pending_units===1 && current.own_score.awaiting_close_units===0);
     for(const [name,total] of [['正確',-1],['錯誤',-5],['未判定',-3],['正確',-1]]) {
       await page.getByRole('button',{name:`測試A組 第 3 題判為${name}`,exact:true}).click();
       await a.waitForFunction(total=>current.own_score.total===total,total);
@@ -76,7 +87,7 @@ async (page) => {
     await a.screenshot({path:'output/playwright/question-types-student.png',fullPage:true});
     check(!errors.length,errors.join('\n'));
     return {passed:true,combinations:['choice + stake','choice + no bet','short + stake','short + no bet'],
-      ownScoreDuringActivity:true,manualRegrade:true,choiceAndZeroDraftRestored:true,answerKeyHidden:true,pageErrors:errors};
+      ownScoreDuringActivity:true,scorePublishedOnlyAfterClose:true,manualRegrade:true,choiceAndZeroDraftRestored:true,answerKeyHidden:true,pageErrors:errors};
   } catch(error) {throw new Error(`${stage}: ${error.message}`);}
   finally {for(const student of students) await student.close();}
 }

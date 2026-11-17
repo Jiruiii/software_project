@@ -79,13 +79,16 @@ class ExtraFeatures:
 
     def _own_score(self, answers, units):
         lookup={a['question_id']:a for a in answers}
-        total, pending=0,0
+        total, pending, awaiting=0,0,0
         for qs in units.values():
             own=[lookup[q] for q in qs if q in lookup]
+            if any(a['verdict']=='withheld' for a in own):
+                awaiting += 1
+                continue
             total += self._unit_points(own,qs)
             if own and not any(a['verdict']=='incorrect' for a in own) and any(a['verdict']=='pending' for a in own):
                 pending += 1
-        return {'total':total,'pending_units':pending}
+        return {'total':total,'pending_units':pending,'awaiting_close_units':awaiting}
 
     def reference(self, token, aid, question, answer):
         from quiz_service import QuizError
