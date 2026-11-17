@@ -71,7 +71,7 @@ class SheetsAutoSync:
                     # while invalidating the earlier confirmation. Recheck once.
                     if binding['signature'] == signature and not queued: continue
                     binding['signature'] = signature
-                self.status(aid, 'syncing', '正在同步已關閉題目的最快有效答案…')
+                self.status(aid, 'syncing', '正在同步已結束題目的學習單答案…')
                 result = self.flow.export(token, aid)
                 latest, current = self.service.export_context(token, aid)
                 if json.dumps([latest['_closed_questions'], current], sort_keys=True, ensure_ascii=False) != signature:

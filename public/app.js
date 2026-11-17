@@ -463,23 +463,75 @@ async function refresh() {
 async function poll() {await refresh(); setTimeout(poll, 700);}
 showView(); connection(true); poll();
 let reportKey = '';
+const referenceDrafts = new Map();
+let referenceActivity = '', referenceRound = '';
+function referenceDraft(state, q) {
+  const key=`${state.id}:${q}`;
+  if(!referenceDrafts.has(key)) referenceDrafts.set(key,{answer:'',override:false,dirty:false,saving:false});
+  const draft=referenceDrafts.get(key);
+  if(!draft.dirty && !draft.saving) {
+    draft.answer=state.references[q] || '';
+    draft.override=!!state.reference_overrides[q];
+  }
+  return draft;
+}
+function renderTeacherReference(state) {
+  const questions=state.reviewable_questions;
+  if(!questions.length) return;
+  const select=$('reference-question'), activityChanged=referenceActivity!==state.id;
+  const round=`${state.id}:${state.phase}:${state.round.unit_id}:${state.round.round_open}`;
+  let selected=select.value;
+  if(activityChanged || round!==referenceRound) {
+    const currentQuestions=state.units.find(u=>u.id===state.round.unit_id)?.questions || [];
+    selected=currentQuestions.find(q=>questions.includes(q)) || (activityChanged ? questions[0] : selected);
+  }
+  if(activityChanged) $('references').open=false;
+  referenceActivity=state.id; referenceRound=round;
+  const listKey=JSON.stringify([state.id,questions]);
+  if(select.dataset.key!==listKey) {
+    select.replaceChildren(...questions.map(q=>{const option=el('option',`第 ${q} 題`);option.value=q;return option;}));
+    select.dataset.key=listKey;
+  }
+  select.value=questions.includes(selected)?selected:questions[0];
+  const q=select.value, draft=referenceDraft(state,q);
+  if($('reference-answer').value!==draft.answer) $('reference-answer').value=draft.answer;
+  $('reference-override').checked=draft.override;
+  $('reference-override-field').hidden=!state.source;
+  $('reference-sheet-help').textContent=state.source?'勾選並儲存後，學習單以老師答案為準；取消勾選並儲存後，恢復最快未判錯組的答案，無有效答案則還原原值。':'此活動沒有連結學習單，答案只存入學生報告。';
+  $('reference-summary').textContent=`第 ${q} 題 · 老師正確答案（選填）`;
+  $('reference-save').disabled=draft.saving;
+  $('reference-status').textContent=draft.saving?'儲存中…':draft.dirty?'尚未儲存':draft.answer?(draft.override?'已儲存 · 已指定用於學習單':'已儲存 · 僅供報告參考'):'尚未填寫，可直接繼續';
+}
+function captureReferenceDraft() {
+  if(current?.role!=='teacher') return;
+  const draft=referenceDraft(current,$('reference-question').value);
+  draft.answer=$('reference-answer').value; draft.override=$('reference-override').checked; draft.dirty=true;
+  renderTeacherReference(current);
+}
+$('reference-answer').oninput=captureReferenceDraft;
+$('reference-override').onchange=captureReferenceDraft;
+$('reference-question').onchange=()=>renderTeacherReference(current);
+$('reference-form').onsubmit=event=>{
+  event.preventDefault();
+  const state=current, q=$('reference-question').value, draft=referenceDraft(state,q);
+  const answer=draft.answer, override=draft.override;
+  if(override && !answer.trim()) {notice('請先填寫老師答案，再勾選更新學習單。');$('reference-answer').focus();return;}
+  action($('reference-save'),async()=>{
+    draft.saving=true; renderTeacherReference(state);
+    try {
+      await api(`/api/activities/${state.id}/reference`,{question:q,answer,override});
+      if(draft.answer===answer && draft.override===override) {draft.answer=answer.trim();draft.dirty=false;}
+      notice(override?'老師答案已儲存，學習單將自動同步。':'老師答案已儲存。',true);
+      await refresh();
+    } finally {draft.saving=false;if(current?.id===state.id) renderTeacherReference(current);}
+  });
+};
 $("download-report").onclick = () => action($("download-report"),()=>downloadFile(`/api/activities/${activityId}/report`, '本組學習報告.csv'));
 function renderReport(state) {
   const ended=state.phase==='results', teacher=state.role==='teacher';
-  $('references').hidden=!ended || !teacher; $('group-report').hidden=!ended || teacher;
+  $('group-report').hidden=!ended || teacher;
   if (!ended) return;
-  if (teacher) {
-    if ($('references').dataset.activity !== state.id) {
-      $('references').dataset.activity=state.id;
-      $('reference-forms').replaceChildren(...state.questions.map((q,i)=>{
-        const form=el('form'), label=el('label',`第 ${q} 題參考答案`), input=el('textarea'), button=el('button','儲存參考答案','primary');
-        input.id=`reference-${i}`; label.htmlFor=input.id; input.maxLength=2000; input.value=state.references[q];
-        form.append(label,input,button);
-        form.onsubmit=event=>{event.preventDefault(); action(button,async()=>{await api(`/api/activities/${state.id}/reference`,{question:q,answer:input.value}); notice('參考答案已儲存。',true); await refresh();});};
-        return form;
-      }));
-    }
-  } else {
+  if (!teacher) {
     const key=JSON.stringify([state.id,state.report]); if (key===reportKey) return; reportKey=key;
     const table=el('table'), head=el('tr');
     for (const title of ['題號','本組答案','判定','下注','單位得分','搶答成功','參考答案']) head.append(el('th',title));
@@ -659,8 +711,9 @@ function renderTeacherWorkspace(state) {
   const teacher=state.role==='teacher', preparing=state.phase==='preparing', ended=state.phase==='results';
   $('teacher-tabs').hidden=!teacher; $('setup-status').hidden=!teacher || !preparing;
   $('save-settings').hidden=!preparing;
-  for(const id of ['references','replay','classification']) $(`tool-${id}`).hidden=true;
+  for(const id of ['replay','classification']) $(`tool-${id}`).hidden=true;
   $('result-actions').hidden=true;
+  $('references').hidden=true;
   if(!teacher) return;
   const key=state.id+state.phase;
   if(teacherViewKey!==key) {teacherViewKey=key; teacherView=preparing?'settings':ended?'results':'monitor';}
@@ -674,7 +727,9 @@ function renderTeacherWorkspace(state) {
   for(const id of ['settings-form','question-settings','teacher-monitor','results','scoreboard','result-actions']) $(id).hidden=!sections[teacherView]?.includes(id);
   $('content-title').textContent={settings:'1. 設定活動方式',questions:'2. 設定題目與計分',monitor:preparing?'等待小組加入':'查看作答與批改',results:'本次搶答成果',tools:'更多教學工具'}[teacherView];
   $('phase-help').textContent={settings:'保留預設也能直接開始。需要逐題控制時，切換開放方式。',questions:'單選自動批改；簡答由老師批改。每題可獨立開關下注。',monitor:preparing?'分享上方代碼；同組同學使用相同組名加入。':'答案自動更新。選擇題目可集中查看與批改。',results:'這裡顯示搶答成果與總分。需要改判時，切換到「作答與批改」。',tools:'需要時再展開。這些工具不影響原本的搶答流程。'}[teacherView];
-  for(const id of ['references','replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
+  for(const id of ['replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
+  renderTeacherReference(state);
+  $('references').hidden=!state.reviewable_questions.length || !['monitor','results'].includes(teacherView);
   $('download-csv').hidden=!ended; $('sheet-export-controls').hidden=!state.source;
   $('start').textContent='開始搶答 →';
   $('end').textContent=state.settings.mode==='sequential'?'提早結束整場':'結束搶答並公布結果';
@@ -722,7 +777,9 @@ $('settings-form').oninput=$('settings-form').onchange=()=>{$('settings-form').d
 $('save-settings').onclick=()=>action($('save-settings'),async()=>{if(savingSettings) return; await saveAllSettings(); notice('所有設定已儲存。',true); await refresh();});
 $('result-actions').append($('download-csv'));
 $('teacher-tabs').after($('sheet-export-controls'));
-for(const [id,title] of [['references','提供參考答案'],['replay','重播搶答過程'],['classification','比較相似答案']]) {
+for(const [id,title] of [['replay','重播搶答過程'],['classification','比較相似答案']]) {
   const section=$(id), wrapper=el('details',undefined,'tool-disclosure panel'); wrapper.id=`tool-${id}`; wrapper.hidden=true;
   const summary=el('summary',title); section.before(wrapper); wrapper.append(summary,section);
 }
+
+$('own-score').before($('references'));

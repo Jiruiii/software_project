@@ -90,15 +90,24 @@ class ExtraFeatures:
                 pending += 1
         return {'total':total,'pending_units':pending,'awaiting_close_units':awaiting}
 
-    def reference(self, token, aid, question, answer):
+    @expire_first
+    def reference(self, token, aid, question, answer, override=False):
         from quiz_service import QuizError
         with self.lock, self.db:
             self._auth(token, "teacher")
-            if self._activity(aid)["phase"] != "results": raise QuizError(409, "請先結束活動再填寫參考答案。")
+            activity = self._activity(aid)
             if not isinstance(answer, str) or len(answer) > 2000: raise QuizError(400, "參考答案最多 2000 字。")
             if not isinstance(question, str): raise QuizError(400, "請提供題號。")
-            cursor = self.db.execute("UPDATE question_meta SET reference_answer=? WHERE activity_id=? AND question_id=?", (answer.strip(), aid, question))
+            if not self.db.execute('SELECT 1 FROM questions WHERE activity_id=? AND id=?', (aid, question)).fetchone():
+                raise QuizError(404, "題號不存在。")
+            if not self._reviewable(activity, question): raise QuizError(409, "請先關閉此題或結束活動，再填寫老師答案。")
+            if type(override) is not bool: raise QuizError(400, "請選擇是否用老師答案更新學習單。")
+            if override and not answer.strip(): raise QuizError(400, "請先填寫老師答案，再勾選更新學習單。")
+            if override and not self.db.execute('SELECT 1 FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone():
+                raise QuizError(409, "這是手動題號活動，只能儲存參考答案。")
+            cursor = self.db.execute("UPDATE question_meta SET reference_answer=?,reference_override=? WHERE activity_id=? AND question_id=?", (answer.strip(), int(override), aid, question))
             if not cursor.rowcount: raise QuizError(404, "題號不存在。")
+            self._invalidate_sheet_export(aid)
             return {"ok":True}
 
     def _report(self, state):
@@ -190,7 +199,8 @@ class ExtraFeatures:
         for name, definition in [('question_type', "TEXT NOT NULL DEFAULT 'short'"),
                                  ('options_json', "TEXT NOT NULL DEFAULT '[]'"),
                                  ('correct_index', 'INTEGER'),
-                                 ('betting_enabled', 'INTEGER NOT NULL DEFAULT 1'), ('opened_at', 'REAL')]:
+                                 ('betting_enabled', 'INTEGER NOT NULL DEFAULT 1'), ('opened_at', 'REAL'),
+                                 ('reference_override', 'INTEGER NOT NULL DEFAULT 0')]:
             if name not in columns:
                 self.db.execute(f'ALTER TABLE question_meta ADD COLUMN {name} {definition}')
         self._migrate_answer_timing()
@@ -296,14 +306,22 @@ class ExtraFeatures:
         if not row: return
         source = json.loads(row['source_json'])
         activity = self._activity(aid)
-        winners = self._winner_rows(aid)
+        winners = self._sheet_answers(activity)
         last = source.get('last_export', {})
-        desired = {t['question']:(winners[t['question']]['text'] if t['question'] in winners else t['original'])
+        desired = {t['question']:(winners[t['question']] if t['question'] in winners else t['original'])
                    for t in source['targets'] if self._reviewable(activity,t['question']) and (t['question'] in winners or t['question'] in last)}
         if desired != last:
             self.db.execute('UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?', (aid,))
             if aid in self.sheet_sync_states:
-                self.sheet_sync_states[aid] = {'state':'queued', 'message':'判定已更新，等待同步最新答案。'}
+                self.sheet_sync_states[aid] = {'state':'queued', 'message':'答案已更新，等待同步學習單。'}
+
+    def _sheet_answers(self, activity):
+        aid = activity['id']
+        answers = {q:a['text'] for q,a in self._winner_rows(aid).items() if self._reviewable(activity,q)}
+        for row in self.db.execute('SELECT question_id,reference_answer FROM question_meta WHERE activity_id=? AND reference_override=1', (aid,)):
+            if row['reference_answer'] and self._reviewable(activity,row['question_id']):
+                answers[row['question_id']] = row['reference_answer']
+        return answers
 
     @expire_first
     def review_batch(self, token, aid, question, selections, verdict):
@@ -477,9 +495,11 @@ class ExtraFeatures:
         state["available_questions"] = available
         if session["role"] == "teacher":
             state["reviewable_questions"] = [q for q in state["questions"] if self._reviewable(state, q)]
+            state['reference_overrides'] = {r['question_id']:bool(r['reference_override']) for r in self.db.execute('SELECT question_id,reference_override FROM question_meta WHERE activity_id=?', (state['id'],))}
+        if session['role'] == 'teacher' or state['phase'] == 'results':
+            state["references"] = {r["question_id"]:r["reference_answer"] for r in self.db.execute("SELECT question_id,reference_answer FROM question_meta WHERE activity_id=?", (state["id"],))}
         if state["phase"] == "results":
             state["scoreboard"] = self._scoreboard(state['id'])
-            state["references"] = {r["question_id"]:r["reference_answer"] for r in self.db.execute("SELECT question_id,reference_answer FROM question_meta WHERE activity_id=?", (state["id"],))}
             if session["role"] == "student": state["report"] = self._report(state)
         return state
 

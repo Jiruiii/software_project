@@ -83,7 +83,7 @@
           <div id="teacher-controls" hidden><button id="save-settings" class="secondary">儲存設定</button><button id="start" class="primary">開始搶答 →</button><button id="end" class="danger" hidden>結束活動</button></div>
           <div id="round-controls" hidden><button id="close-round" class="danger wide">關閉本題</button><button id="next-round" class="primary wide">開啟下一題 →</button></div>
           <p id="session-rule" class="sidebar-note"></p>
-          <div id="sheet-export-controls" class="sheet-sync-panel" hidden><p id="source-name" class="sidebar-note"></p><p id="sheet-sync-status" role="status"></p><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟來源學習單 ↗</a><button id="sheet-export" class="secondary" hidden>重試同步</button><p class="field-hint">每輪關題後自動寫入最快未判錯組別；改判會自動遞補。Google 尚未連線時，先返回活動清單連線。同步期間請勿移動原表列欄。</p></div>
+          <div id="sheet-export-controls" class="sheet-sync-panel" hidden><p id="source-name" class="sidebar-note"></p><p id="sheet-sync-status" role="status"></p><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟來源學習單 ↗</a><button id="sheet-export" class="secondary" hidden>重試同步</button><p class="field-hint">每輪關題後自動寫入最快未判錯組別；若指定老師答案，則優先使用老師答案。Google 尚未連線時，先返回活動清單連線。同步期間請勿移動原表列欄。</p></div>
         </aside>
         <div class="session-main">
           <nav id="teacher-tabs" class="workspace-nav" aria-label="老師工作區" hidden><button data-view="settings">1 活動設定</button><button data-view="questions">2 題目與計分</button><button data-view="monitor">作答與批改</button><button data-view="results">搶答結果</button><button data-view="tools">更多工具</button></nav>
@@ -105,7 +105,7 @@
           <section id="question-settings" class="panel" hidden><h3>題型與下注</h3><p class="field-hint">每題可選簡答或單選，並獨立決定是否開放下注。單選自動批改每組，簡答由老師批改；開始後不能修改。題組共用一次下注。</p><div id="question-settings-forms"></div></section>
           <div id="results" hidden></div>
           <section id="scoreboard" class="panel" hidden><h3>小組得分排行</h3><p class="field-hint">每組答對加下注分、答錯扣下注分、未判定 0 分。題組只計一次；同分同名次。</p><div id="scoreboard-table" class="table-scroll"></div></section>
-          <section id="references" class="panel" hidden><h3>老師參考答案</h3><p class="field-hint">儲存後會出現在各組報告；不會自動判分。</p><div id="reference-forms"></div></section>
+          <details id="references" class="panel teacher-reference" hidden><summary id="reference-summary">老師正確答案（選填）</summary><p class="field-hint">全部答錯或需要補充時可填寫；也可以跳過。儲存後會出現在各組報告，不影響判定與分數。</p><label for="reference-question">選擇已結束的題目</label><select id="reference-question"></select><form id="reference-form"><label for="reference-answer">老師正確答案</label><textarea id="reference-answer" maxlength="2000" rows="3" placeholder="選填，最多 2000 字"></textarea><label id="reference-override-field" class="check-label"><input id="reference-override" type="checkbox">用老師答案更新學習單</label><p id="reference-sheet-help" class="field-hint"></p><div class="form-actions"><button id="reference-save" class="primary">儲存老師答案</button><span id="reference-status" class="field-hint" role="status"></span></div></form></details>
           <section id="group-report" class="panel" hidden><h3>本組學習報告</h3><p class="field-hint">正確加下注分、錯誤扣下注分、未判定 0 分。題組只計一次，得分列於第一小題。</p><div id="report-table" class="table-scroll"></div><button id="download-report" class="primary">下載本組報告 CSV</button></section>
           <button id="download-csv" class="primary" hidden>下載活動 CSV</button>
           <section id="result-actions" class="panel" hidden><h3>下載與寫回</h3></section>

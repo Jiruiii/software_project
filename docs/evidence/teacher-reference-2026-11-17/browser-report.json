@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "timestampUtc": "2026-11-17T13:00:34.255223+00:00",
+  "checks": [
+    "closed-only",
+    "reference-override",
+    "cancel-restores-winner",
+    "polling-draft",
+    "switch-draft",
+    "reload-persistence",
+    "no-answers",
+    "student-report-score",
+    "all-mode",
+    "mobile-layout"
+  ],
+  "pageErrors": [],
+  "verifiedWriteSequence": [
+    "學生答案",
+    "老師正解",
+    "學生答案",
+    "無人作答的正解"
+  ],
+  "googleMode": "in-memory REST fixture; no live Google write"
+}

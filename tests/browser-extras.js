@@ -128,9 +128,9 @@ async (page) => {
   stage='line 66';
   check(await student.locator('#classification').isHidden(),'student clusters exposed');
   stage='line 67';
-  await page.locator('#tool-references > summary').click(); await page.locator('#reference-0').fill('老師提供的參考答案');
+  await page.locator('#teacher-tabs [data-view="results"]').click(); await page.locator('#references > summary').click(); await page.locator('#reference-answer').fill('老師提供的參考答案');
   stage='line 68';
-  await page.locator('#reference-forms form').first().locator('button').click();
+  await page.locator('#reference-save').click();
   stage='line 69';
   await student.waitForFunction(()=>document.querySelector('#report-table').textContent.includes('老師提供的參考答案'));
   stage='line 70';

@@ -44,9 +44,10 @@ async (page) => {
     await student.locator('#join-code').fill(await page.locator('#session-code').innerText()); await student.locator('#join-group').fill('第一組_ABCDEFGHIJKLMNOPQRSTUVWXYZ'); await student.locator('#join-form button').click();
     await page.locator('#start').click(); await student.waitForFunction(()=>!document.querySelector('#answer-0').disabled);
     await student.locator('#answer-0').selectOption('二氧化碳與水'); await student.locator('#stake-0').selectOption('2'); await student.locator('.question-card').first().locator('button').click();
-    await student.waitForFunction(()=>current.own_score.total===2); await page.waitForFunction(()=>current.answers.length===1);
+    await student.waitForFunction(()=>current.own_score.awaiting_close_units===1); await page.waitForFunction(()=>current.answers.length===1);
+    check(await student.evaluate(()=>current.own_score.total===0),'score published before close');
     check(await page.locator('#teacher-monitor').isVisible(),'active default not monitor');
-    await page.locator('#close-round').click(); await page.locator('#next-round').click(); await student.waitForFunction(()=>!document.querySelector('#answer-1').disabled);
+    await page.locator('#close-round').click(); await student.waitForFunction(()=>current.own_score.total===2); await page.locator('#next-round').click(); await student.waitForFunction(()=>!document.querySelector('#answer-1').disabled);
     await student.locator('#answer-1').fill('植物利用光能進行光合作用。'+ 'LongAnswer'.repeat(70)); await student.locator('.question-card').nth(1).locator('button').click();
     await page.waitForFunction(()=>current.answers.length===2); await page.locator('#close-round').click();
     check(await page.locator('#monitor-question').inputValue()==='2','sequential monitor not following');
@@ -60,9 +61,9 @@ async (page) => {
     await page.locator('#results .full-answer summary').click(); await capture('results-desktop');
     check(await page.locator('#teacher-monitor').isHidden(),'results stacked with monitor');
     const download=page.waitForEvent('download'); await page.locator('#download-csv').click(); await download;
-    await tab('tools'); await page.locator('#tool-references > summary').click(); await page.locator('#reference-0').fill('二氧化碳與水'); await page.locator('#reference-forms form').first().locator('button').click();
+    await page.locator('#references > summary').click(); await page.locator('#reference-question').selectOption('1'); await page.locator('#reference-answer').fill('二氧化碳與水'); await page.locator('#reference-save').click();
     await student.waitForFunction(()=>current.report[0].reference==='二氧化碳與水');
-    await page.locator('#tool-classification > summary').click(); await page.locator('#cluster-refresh').click(); await page.locator('#cluster-limit').filter({hasText:'已更新'}).waitFor();
+    await tab('tools'); await page.locator('#tool-classification > summary').click(); await page.locator('#cluster-refresh').click(); await page.locator('#cluster-limit').filter({hasText:'已更新'}).waitFor();
     await page.locator('#tool-replay > summary').click(); await page.locator('#replay-play').click(); await page.locator('#replay-status').filter({hasText:'播放完成'}).waitFor();
     await page.setViewportSize({width:390,height:844}); await capture('tools-mobile'); await tab('results');
     check(await page.locator('#scoreboard-table').evaluate(e=>e.scrollWidth<=e.clientWidth),'mobile score column requires horizontal scroll'); await capture('results-mobile');

@@ -97,7 +97,7 @@ class QuizService(ExtraFeatures):
             row = self.db.execute("SELECT source_json FROM sheet_sources WHERE activity_id=?",(aid,)).fetchone()
             if not row:
                 raise QuizError(409, "這是手動題號活動，沒有可寫回的 Google Sheet。")
-            winners = {q: a["text"] for q, a in self._winner_rows(aid).items() if q in closed}
+            winners = self._sheet_answers(activity)
             source = json.loads(row["source_json"])
             source['_closed_questions'] = closed
             return source, winners
@@ -109,8 +109,8 @@ class QuizService(ExtraFeatures):
             source.setdefault("last_export", {}).update(expected)
             source["sheet_id"] = sheet_id
             activity=self._activity(aid)
-            winners={q:a for q,a in self._winner_rows(aid).items() if self._reviewable(activity,q)}
-            desired={t['question']:(winners[t['question']]['text'] if t['question'] in winners else t['original'])
+            winners=self._sheet_answers(activity)
+            desired={t['question']:(winners[t['question']] if t['question'] in winners else t['original'])
                      for t in source['targets'] if self._reviewable(activity,t['question']) and (t['question'] in winners or t['question'] in expected)}
             current = desired == expected
             self.db.execute("UPDATE sheet_sources SET source_json=?,exported_at=? WHERE activity_id=?",

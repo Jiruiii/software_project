@@ -21,7 +21,7 @@ from guided_notes import from_xlsx, parse_grid
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui','batch-review','question-timing','auto-sync'],default='extras')
+    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui','batch-review','question-timing','auto-sync','teacher-reference'],default='extras')
     suite=parser.parse_args().suite
     output = ROOT/"output/playwright"; output.mkdir(parents=True, exist_ok=True)
     service = QuizService(":memory:", "extras-test-only")
@@ -48,7 +48,7 @@ def main():
         service.db.execute("UPDATE question_meta SET opened_at=NULL WHERE activity_id=? AND question_id='1'", (aid,))
         service.db.commit()
     connection = GoogleConnection(ROOT/"tmp/not-configured-extras.json")
-    if suite == 'auto-sync':
+    if suite in ('auto-sync','teacher-reference'):
         from test_google_sheets import FakeGoogle, COPY_URL
         connection = FakeGoogle()
         flow = SheetsWorkflow(service, connection)
@@ -77,6 +77,12 @@ def main():
                        for _, body in connection.writes for r in body['requests']]
             if written != ['最快答案', '第二快答案', '', '最快答案', '正解']:
                 raise AssertionError('Unexpected sheet write sequence: '+repr(written))
+            report['verifiedWriteSequence'] = written
+            report['googleMode'] = 'in-memory REST fixture; no live Google write'
+        if suite == 'teacher-reference':
+            written = [r['updateCells']['rows'][0]['values'][0]['userEnteredValue']['stringValue'] for _, body in connection.writes for r in body['requests']]
+            if written != ['學生答案','老師正解','學生答案','無人作答的正解']:
+                raise AssertionError('Unexpected teacher reference writes: '+repr(written))
             report['verifiedWriteSequence'] = written
             report['googleMode'] = 'in-memory REST fixture; no live Google write'
         print(json.dumps(report, ensure_ascii=True, indent=2))

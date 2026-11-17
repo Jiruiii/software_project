@@ -241,6 +241,9 @@ class Acceptance:
                         check(actual.get(targets[q],{}).get('userEnteredValue',{}).get('stringValue','')==value,'Auto sync cell mismatch')
                     ignored=[(sheet_id,*targets[q]) for q in unit['questions']]
                     check(normalized(before,ignored)==normalized(after,ignored),'Auto sync changed unrelated cells or formatting')
+                    # Pace the acceptance harness's extra read-back calls so
+                    # two layouts do not exhaust the per-minute Google quota.
+                    time.sleep(4)
                     return state
                 time.sleep(.5)
             raise AssertionError('Automatic round sync timed out')
@@ -255,7 +258,24 @@ class Acceptance:
             previous=state['source']['exported_at']
             self.http(prefix+'/review', {'answer_id':answer_id,'verdict':verdict})
             state=wait_for(expected,previous)
-        return {'layout':title,'passed':True,'closedRoundOnly':True,'fallback':True,'restoreWhenAllWrong':True,'regradeRestoredFirst':True,'unrelatedCellsAndFormatsPreserved':True,'grouped':len(unit['questions'])>1}
+        q=unit['questions'][0]
+        teacher_answer='=老師正確答案－'+q
+        previous=state['source']['exported_at']
+        self.http(prefix+'/reference', {'question':q,'answer':teacher_answer,'override':True})
+        state=wait_for({**first,q:teacher_answer},previous)
+        previous=state['source']['exported_at']
+        self.http(prefix+'/reference', {'question':q,'answer':teacher_answer,'override':False})
+        state=wait_for(first,previous)
+        previous=state['source']['exported_at']
+        self.http(prefix+'/review', {'answer_id':ids[0],'verdict':'incorrect'})
+        state=wait_for(expected_original,previous)
+        previous=state['source']['exported_at']
+        self.http(prefix+'/reference', {'question':q,'answer':teacher_answer,'override':True})
+        state=wait_for({**expected_original,q:teacher_answer},previous)
+        previous=state['source']['exported_at']
+        self.http(prefix+'/reference', {'question':q,'answer':'','override':False})
+        state=wait_for(expected_original,previous)
+        return {'layout':title,'passed':True,'closedRoundOnly':True,'fallback':True,'restoreWhenAllWrong':True,'regradeRestoredFirst':True,'teacherOverride':True,'cancelRestoresWinner':True,'teacherWhenAllWrong':True,'clearRestoresOriginal':True,'unrelatedCellsAndFormatsPreserved':True,'grouped':len(unit['questions'])>1}
 
 
 def main():

@@ -125,7 +125,7 @@ def make_server(service, port=8000, sheets=None):
                 if self.command == "POST" and action == "bundle":
                     return self.respond(200, service.submit_unit(token, aid, data.get("unit"), data.get("answers"), data.get("stake", 0)))
                 if self.command == "POST" and action == "reference":
-                    return self.respond(200, service.reference(token, aid, data.get("question"), data.get("answer")))
+                    return self.managed(service.reference(token, aid, data.get("question"), data.get("answer"), data.get("override", False)), token, aid)
                 if self.command == "GET" and action == "report":
                     return self.respond(200, service.report_csv(token, aid), "text/csv; charset=utf-8", "group-report.csv")
                 if self.command == "POST" and action == "clusters":
