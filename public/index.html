@@ -111,7 +111,7 @@
           <section id="result-actions" class="panel" hidden><h3>下載與寫回</h3></section>
           <section id="replay" class="panel" hidden>
             <h3>搶答過程重播</h3><label for="replay-question">選擇題號</label><select id="replay-question"></select>
-            <p class="field-hint">依原始收件順序播放，長時間等待會縮短；重播不會修改紀錄。</p>
+            <p class="field-hint">秒數從該題開放時計算，包含保底先答時間。依原始收件順序播放，長時間等待會縮短；無法還原起點的舊答案會標示「活動開始後（舊紀錄）」。</p>
             <button id="replay-play" class="primary">播放</button> <button id="replay-reset" class="text-button">從頭重播</button>
             <p id="replay-status" aria-live="polite"></p><ol id="replay-answers"></ol>
           </section>

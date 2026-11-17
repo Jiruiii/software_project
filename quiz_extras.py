@@ -181,14 +181,32 @@ class ExtraFeatures:
             self.db.execute("ALTER TABLE answers ADD COLUMN verdict TEXT NOT NULL DEFAULT 'pending'")
         if "review_revision" not in columns:
             self.db.execute("ALTER TABLE answers ADD COLUMN review_revision INTEGER NOT NULL DEFAULT 0")
+        if "elapsed_basis" not in columns:
+            self.db.execute("ALTER TABLE answers ADD COLUMN elapsed_basis TEXT NOT NULL DEFAULT 'activity'")
         columns = {r['name'] for r in self.db.execute('PRAGMA table_info(question_meta)')}
         for name, definition in [('question_type', "TEXT NOT NULL DEFAULT 'short'"),
                                  ('options_json', "TEXT NOT NULL DEFAULT '[]'"),
                                  ('correct_index', 'INTEGER'),
-                                 ('betting_enabled', 'INTEGER NOT NULL DEFAULT 1')]:
+                                 ('betting_enabled', 'INTEGER NOT NULL DEFAULT 1'), ('opened_at', 'REAL')]:
             if name not in columns:
                 self.db.execute(f'ALTER TABLE question_meta ADD COLUMN {name} {definition}')
+        self._migrate_answer_timing()
         self.db.commit()
+
+    def _migrate_answer_timing(self):
+        # Older versions retained only the last sequential round's opening.
+        for activity in self.db.execute("SELECT a.id,a.started_at,o.mode,o.round_index,o.round_started_at FROM activities a JOIN activity_options o ON a.id=o.activity_id WHERE a.started_at IS NOT NULL").fetchall():
+            if activity['mode'] == 'all':
+                self.db.execute('UPDATE question_meta SET opened_at=? WHERE activity_id=? AND opened_at IS NULL',
+                                (activity['started_at'], activity['id']))
+            elif activity['round_index'] >= 0 and activity['round_started_at'] is not None:
+                units = list(self._units(activity['id']).values())
+                if activity['round_index'] < len(units):
+                    self.db.executemany('UPDATE question_meta SET opened_at=? WHERE activity_id=? AND question_id=? AND opened_at IS NULL',
+                                        [(activity['round_started_at'], activity['id'], q) for q in units[activity['round_index']]])
+        old = self.db.execute("SELECT a.id,a.received_at,m.opened_at FROM answers a JOIN question_meta m ON m.activity_id=a.activity_id AND m.question_id=a.question_id WHERE a.elapsed_basis='activity' AND m.opened_at IS NOT NULL").fetchall()
+        self.db.executemany("UPDATE answers SET elapsed_ms=?,elapsed_basis='question' WHERE id=?",
+                            [(max(0, round((r['received_at']-r['opened_at'])*1000)), r['id']) for r in old])
 
     def question_settings(self, token, aid, unit, betting_enabled, questions):
         from quiz_service import QuizError, text
@@ -368,6 +386,9 @@ class ExtraFeatures:
                     eligible.append(gid)
                     self.db.execute("UPDATE group_progress SET misses=0 WHERE group_id=?", (gid,))
         now = time.time()
+        questions = list(self._units(aid).values())[index]
+        self.db.executemany('UPDATE question_meta SET opened_at=? WHERE activity_id=? AND question_id=?',
+                            [(now, aid, q) for q in questions])
         self.db.execute("UPDATE activity_options SET round_index=?,round_open=1,round_started_at=?,priority_until=?,eligible_json=?,participants_json=? WHERE activity_id=?",
                         (index, now, now+3 if eligible else 0, json.dumps(eligible), json.dumps(participants), aid))
         self.db.execute('UPDATE activity_options SET deadline=? WHERE activity_id=?', (now+options['duration_seconds'] if options['duration_seconds'] else None,aid))
@@ -455,15 +476,16 @@ class ExtraFeatures:
                 raise QuizError(409, "請先結束活動再下載紀錄。")
             winners = {r["question_id"]: r["winner"] for r in state["results"]}
             unit_ids = {q:u["id"] for u in state["units"] for q in u["questions"]}
-            rows = [["題號", "題組", "組別", "答案", "收件時間 UTC", "開始後秒數", "原始順位", "搶答成功"]]
+            rows = [["題號", "題組", "組別", "答案", "收件時間 UTC", "計時基準", "送出秒數", "原始順位", "搶答成功"]]
             for question in state["questions"]:
                 answers = [a for a in state["answers"] if a["question_id"] == question]
                 if not answers:
-                    rows.append([question, unit_ids[question], "", "無人作答", "", "", "", "否"])
+                    rows.append([question, unit_ids[question], "", "無人作答", "", "", "", "", "否"])
                 for rank, answer in enumerate(answers, 1):
                     winner = winners[question]
                     rows.append([question, unit_ids[question], answer["group_name"], answer["text"],
                                  datetime.fromtimestamp(answer["received_at"], timezone.utc).isoformat(),
+                                 "該題開放" if answer['elapsed_basis'] == 'question' else "活動開始（舊紀錄）",
                                  f"{answer['elapsed_ms']/1000:.3f}", rank,
                                  "是" if winner and winner["group_name"] == answer["group_name"] else "否"])
             return csv_bytes(rows)

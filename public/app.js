@@ -16,6 +16,10 @@ function el(tag, text, cls) {
   if (cls) node.className = cls;
   return node;
 }
+function answerElapsedText(answer) {
+  const origin=answer.elapsed_basis==='question'?'該題開放後':'活動開始後（舊紀錄）';
+  return `${origin} ${(answer.elapsed_ms/1000).toFixed(3)} 秒`;
+}
 function notice(message, success = false) {
   $("notice").textContent = message;
   $("notice").className = success ? "success" : "";
@@ -249,7 +253,7 @@ function updateInputs() {
     for (const field of fields) {
       const answer=answers.get(field.dataset.question), input=field.querySelector('.answer-input'); input.disabled=disabled; input.hidden=!!answer;
       const saved=field.querySelector('.saved-answer'), time=field.querySelector('.answer-time'); saved.hidden=time.hidden=!answer;
-      if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · 開始後 ${(answer.elapsed_ms/1000).toFixed(3)} 秒 · ${verdictNames[answer.verdict]} · ${answer.stake===0?'不押':`下注 ${answer.stake} 分`}`;}
+      if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · ${answerElapsedText(answer)} · ${verdictNames[answer.verdict]} · ${answer.stake===0?'不押':`下注 ${answer.stake} 分`}`;}
     }
   }
 }
@@ -271,7 +275,7 @@ function renderMonitor(state) {
       if (answer) {
         const content=el('span',answer.text,'cell-answer');
         if(answer.text.length>300) {content.tabIndex=0; content.setAttribute('role','region'); content.setAttribute('aria-label',`${group.name} 第 ${q} 題完整答案，可捲動閱讀`);}
-        cell.append(content, el("small", `${timeText(answer.received_at)} · ${(answer.elapsed_ms / 1000).toFixed(3)} 秒 · ${answer.stake===0?'不押':`下注 ${answer.stake}`} · ${verdictNames[answer.verdict]}`));
+        cell.append(content, el("small", `${timeText(answer.received_at)} · ${answerElapsedText(answer)} · ${answer.stake===0?'不押':`下注 ${answer.stake}`} · ${verdictNames[answer.verdict]}`));
         if (state.reviewable_questions.includes(q)) {
           const controls = el("div", undefined, "review-controls");
           for (const verdict of ['correct','incorrect','pending']) {
@@ -320,13 +324,14 @@ function replayTick(now) {
   replayElapsed += now - replayLast; replayLast = now;
   const answers = current.answers.filter(a => a.question_id === $("replay-question").value);
   // Keep the immutable receipt ordering; cap long gaps for classroom playback.
-  let due = 0, previous = 0, shown = 0;
+  let due = 0, previous = null, shown = 0;
   for (const answer of answers) {
-    due += Math.max(400, Math.min(1500, answer.elapsed_ms - previous)); previous = answer.elapsed_ms;
+    const gap=previous===null?answer.elapsed_ms:(answer.received_at-previous)*1000;
+    due += Math.max(400, Math.min(1500, gap)); previous = answer.received_at;
     if (replayElapsed < due) break;
     shown++;
     if ($("replay-answers").children.length < shown)
-      $("replay-answers").append(el("li", `${answer.group_name}：${answer.text} · ${(answer.elapsed_ms/1000).toFixed(3)} 秒`));
+      $("replay-answers").append(el("li", `${answer.group_name}：${answer.text} · ${answerElapsedText(answer)}`));
   }
   if (shown === answers.length) {
     replayRunning = false; $("replay-play").textContent = "播放";

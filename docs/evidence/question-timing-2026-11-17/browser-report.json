@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "timestampUtc": "2026-11-17T10:17:36.221364+00:00",
+  "checks": [
+    "teacher-2.350",
+    "student-2.350",
+    "replay-2.350",
+    "csv-2.350",
+    "legacy-labels",
+    "mobile-no-overflow"
+  ],
+  "pageErrors": []
+}

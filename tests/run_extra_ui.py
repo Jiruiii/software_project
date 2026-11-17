@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,13 +21,32 @@ from guided_notes import from_xlsx, parse_grid
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui','batch-review'],default='extras')
+    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui','batch-review','question-timing'],default='extras')
     suite=parser.parse_args().suite
     output = ROOT/"output/playwright"; output.mkdir(parents=True, exist_ok=True)
     service = QuizService(":memory:", "extras-test-only")
     teacher=service.login('extras-test-only')['token']
     source=parse_grid(from_xlsx((ROOT/'tests/fixtures/grouped.xlsx').read_bytes())[0]); source['spreadsheet_id']='test-grouped-browser-id-1234'
     service.create_from_source(teacher,'題組驗收',source)
+    if suite == 'question-timing':
+        activity = service.create(teacher, '逐題計時驗收', ['1', '2'])
+        aid = activity['id']
+        student = service.join(activity['code'], '計時A組')['token']
+        service.configure(teacher, aid, 'sequential')
+        origin = time.time() - 200
+        with patch('quiz_service.time.time', return_value=origin) as clock:
+            service.transition(teacher, aid, 'active')
+            clock.return_value = origin + 3
+            service.submit(student, aid, '1', '第一題答案')
+            service.round_action(teacher, aid, 'close')
+            clock.return_value = origin + 60
+            service.round_action(teacher, aid, 'next')
+            clock.return_value = origin + 62.35
+            service.submit(student, aid, '2', '第二題答案')
+        # Simulate an earlier legacy round whose opening was never recorded.
+        service.db.execute("UPDATE answers SET elapsed_basis='activity' WHERE activity_id=? AND question_id='1'", (aid,))
+        service.db.execute("UPDATE question_meta SET opened_at=NULL WHERE activity_id=? AND question_id='1'", (aid,))
+        service.db.commit()
     service.logout(teacher)
     server = make_server(service, 0, SheetsWorkflow(service, GoogleConnection(ROOT/"tmp/not-configured-extras.json")))
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()

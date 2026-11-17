@@ -218,6 +218,8 @@ class QuizService(ExtraFeatures):
                 if target == "active": self._open_round(aid, 0)
                 else: self._close_round(aid)
             else:
+                if target == 'active':
+                    self.db.execute('UPDATE question_meta SET opened_at=(SELECT started_at FROM activities WHERE id=?) WHERE activity_id=?', (aid, aid))
                 duration=self._options(aid)['duration_seconds']
                 self.db.execute('UPDATE activity_options SET deadline=? WHERE activity_id=?', (time.time()+duration if target=='active' and duration else None,aid))
             return {"phase": target}
@@ -225,7 +227,7 @@ class QuizService(ExtraFeatures):
     @staticmethod
     def _own_answer(row):
         # Do not expose the global id: gaps would reveal other groups' submissions.
-        return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "stake", "verdict")}
+        return {k: row[k] for k in ("question_id", "text", "received_at", "elapsed_ms", "elapsed_basis", "stake", "verdict")}
 
     @expire_first
     def submit(self, token, aid, question, answer, stake=0, *, _bundle=False, _commit=True, _received=None):
@@ -252,9 +254,11 @@ class QuizService(ExtraFeatures):
                 if previous["text"] != answer or previous["stake"] != stake:
                     raise QuizError(409, "本組已送出此題，不能修改答案。")
                 return self._own_answer(previous)
-            elapsed = max(0, round((received - activity["started_at"]) * 1000))
-            cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,stake,verdict) VALUES(?,?,?,?,?,?,?,?)",
-                                     (aid, question, session["group_id"], answer, received, elapsed, stake, verdict))
+            opened = self.db.execute('SELECT opened_at FROM question_meta WHERE activity_id=? AND question_id=?', (aid, question)).fetchone()['opened_at']
+            basis = 'question' if opened is not None else 'activity'
+            elapsed = max(0, round((received - (opened if opened is not None else activity["started_at"])) * 1000))
+            cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,elapsed_basis,stake,verdict) VALUES(?,?,?,?,?,?,?,?,?)",
+                                     (aid, question, session["group_id"], answer, received, elapsed, basis, stake, verdict))
             return self._own_answer(self.db.execute("SELECT * FROM answers WHERE id=?", (cursor.lastrowid,)).fetchone())
 
     @expire_first
