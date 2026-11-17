@@ -107,6 +107,7 @@ class QuizService(ExtraFeatures):
             self._auth(token, "teacher")
             source = json.loads(self.db.execute("SELECT source_json FROM sheet_sources WHERE activity_id=?",(aid,)).fetchone()[0])
             source.setdefault("last_export", {}).update(expected)
+            source.pop('pending_export', None)
             source["sheet_id"] = sheet_id
             activity=self._activity(aid)
             winners=self._sheet_answers(activity)
@@ -116,6 +117,21 @@ class QuizService(ExtraFeatures):
             self.db.execute("UPDATE sheet_sources SET source_json=?,exported_at=? WHERE activity_id=?",
                             (json.dumps(source,ensure_ascii=False),time.time() if current else None,aid))
             return current
+
+    def journal_export(self, token, aid, expected, previous, sheet_id):
+        with self.lock, self.db:
+            self._auth(token,'teacher')
+            source=json.loads(self.db.execute('SELECT source_json FROM sheet_sources WHERE activity_id=?',(aid,)).fetchone()[0])
+            source['pending_export']={'expected':expected,'previous':previous,'sheet_id':sheet_id}
+            self.db.execute('UPDATE sheet_sources SET source_json=?,exported_at=NULL WHERE activity_id=?',(json.dumps(source,ensure_ascii=False),aid))
+
+    def recover_export(self, token, aid, observed):
+        with self.lock, self.db:
+            self._auth(token,'teacher')
+            source=json.loads(self.db.execute('SELECT source_json FROM sheet_sources WHERE activity_id=?',(aid,)).fetchone()[0])
+            source.setdefault('last_export',{}).update(observed)
+            source.pop('pending_export',None)
+            self.db.execute('UPDATE sheet_sources SET source_json=?,exported_at=NULL WHERE activity_id=?',(json.dumps(source,ensure_ascii=False),aid))
 
     def _token(self, role, activity_id=None, group_id=None):
         raw = secrets.token_urlsafe(32)

@@ -205,12 +205,28 @@ class SheetsWorkflow:
             if len(found) != 1:
                 raise QuizError(409, "來源工作表已移除或改名，請重新匯入。")
             grid = found[0]
+            pending=source.get('pending_export')
+            if pending:
+                if grid.sheet_id!=pending['sheet_id'] or fingerprint(grid,source['targets'])!=source['fingerprint']:
+                    raise QuizError(409,'來源結構已變更，無法恢復上次同步，請檢查學習單。')
+                observed={}
+                for target in source['targets']:
+                    q=target['question']
+                    if q not in pending['expected']: continue
+                    value=grid.cells.get((target['row'],target['col']),'')
+                    if value not in (pending['previous'][q],pending['expected'][q]):
+                        raise QuizError(409,f"{target['cell']} 已被修改，無法恢復上次同步，已保留原內容。")
+                    observed[q]=value
+                self.service.recover_export(token,aid,observed)
+                source,winners=self.service.export_context(token,aid)
             requests, expected = prepare_export(source, grid, winners, source.get('_closed_questions'))
             if not requests:
                 if not self.service.record_export(token, aid, expected, grid.sheet_id):
                     raise QuizError(409, "寫回期間老師判定已改變，請重新寫回最新結果。")
                 return {"written":len(expected), "message":f"已核對 {len(expected)} 題答案，學習單無須修改。",
                         "url":f"https://docs.google.com/spreadsheets/d/{sid}/edit#gid={grid.sheet_id}"}
+            previous={t['question']:grid.cells.get((t['row'],t['col']),'') for t in source['targets'] if t['question'] in expected}
+            self.service.journal_export(token,aid,expected,previous,grid.sheet_id)
             self.google.request(owner, sid, {"requests":requests})
             after = [g for g in from_google(self.google.request(owner, sid)) if g.sheet_id == grid.sheet_id]
             if len(after) != 1 or fingerprint(after[0], source["targets"]) != source["fingerprint"]:

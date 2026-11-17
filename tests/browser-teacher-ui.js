@@ -61,7 +61,7 @@ async (page) => {
     await page.locator('#results .full-answer summary').click(); await capture('results-desktop');
     check(await page.locator('#teacher-monitor').isHidden(),'results stacked with monitor');
     const download=page.waitForEvent('download'); await page.locator('#download-csv').click(); await download;
-    await page.locator('#references > summary').click(); await page.locator('#reference-question').selectOption('1'); await page.locator('#reference-answer').fill('二氧化碳與水'); await page.locator('#reference-save').click();
+    await page.locator('#references > summary').click(); await page.locator('#monitor-question').selectOption('1'); await page.locator('#reference-answer').fill('二氧化碳與水'); await page.locator('#reference-save').click();
     await student.waitForFunction(()=>current.report[0].reference==='二氧化碳與水');
     await tab('tools'); await page.locator('#tool-classification > summary').click(); await page.locator('#cluster-refresh').click(); await page.locator('#cluster-limit').filter({hasText:'已更新'}).waitFor();
     await page.locator('#tool-replay > summary').click(); await page.locator('#replay-play').click(); await page.locator('#replay-status').filter({hasText:'播放完成'}).waitFor();

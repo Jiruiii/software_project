@@ -135,6 +135,8 @@ class ExtraFeatures:
             names = {"pending":"未判定", "correct":"正確", "incorrect":"錯誤", "unanswered":"未作答"}
             rows = [["活動", "組別", "題號", "題組", "本組答案", "判定", "下注", "單位得分（每題組只列一次）", "搶答成功", "參考答案"]]
             rows.extend([[state["title"], state["group_name"], r["question"], r["unit"], r["answer"], names[r["verdict"]], r["stake"], r["points"], "是" if r["successful"] else "否", r["reference"]] for r in state["report"]])
+            rows[0].append('成績狀態')
+            for row in rows[1:]: row.append('批改完成' if state['grading']['complete'] else '暫時成績')
             return csv_bytes(rows)
 
     def clusters(self, token, aid, question):
@@ -182,6 +184,13 @@ class ExtraFeatures:
                 FOREIGN KEY(activity_id,question_id) REFERENCES questions(activity_id,id));
             CREATE TABLE IF NOT EXISTS group_progress (
                 group_id TEXT PRIMARY KEY REFERENCES groups(id), misses INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS fairness_baselines (
+                activity_id TEXT PRIMARY KEY REFERENCES activities(id), counts_json TEXT NOT NULL,
+                legacy INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS fairness_rounds (
+                activity_id TEXT REFERENCES activities(id), round_index INTEGER,
+                participants_json TEXT NOT NULL, consumed_json TEXT NOT NULL,
+                closed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(activity_id,round_index));
             INSERT OR IGNORE INTO activity_options(activity_id) SELECT id FROM activities;
             INSERT OR IGNORE INTO question_meta(activity_id,question_id,unit_id)
                 SELECT activity_id,id,id FROM questions;
@@ -204,6 +213,14 @@ class ExtraFeatures:
             if name not in columns:
                 self.db.execute(f'ALTER TABLE question_meta ADD COLUMN {name} {definition}')
         self._migrate_answer_timing()
+        for a in self.db.execute('SELECT a.id,a.started_at,o.* FROM activities a JOIN activity_options o ON o.activity_id=a.id').fetchall():
+            if self.db.execute('SELECT 1 FROM fairness_baselines WHERE activity_id=?',(a['id'],)).fetchone(): continue
+            legacy = a['started_at'] is not None and a['mode']=='sequential'
+            counts={r['id']:r['misses'] for r in self.db.execute('SELECT g.id,COALESCE(p.misses,0) AS misses FROM groups g LEFT JOIN group_progress p ON p.group_id=g.id WHERE g.activity_id=?',(a['id'],))} if legacy else {}
+            self.db.execute('INSERT INTO fairness_baselines VALUES(?,?,?)',(a['id'],json.dumps(counts),int(legacy)))
+            if legacy and a['round_open']:
+                # Existing counters already consumed this round's priority.
+                self.db.execute('INSERT INTO fairness_rounds VALUES(?,?,?,?,0)',(a['id'],a['round_index'],a['participants_json'],'[]'))
         self.db.commit()
 
     def _migrate_answer_timing(self):
@@ -302,6 +319,7 @@ class ExtraFeatures:
             return {"ok": True}
 
     def _invalidate_sheet_export(self, aid):
+        self._recompute_fairness(aid)
         row = self.db.execute('SELECT source_json FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone()
         if not row: return
         source = json.loads(row['source_json'])
@@ -410,6 +428,7 @@ class ExtraFeatures:
             return {"ok": True}
 
     def _open_round(self, aid, index):
+        self._recompute_fairness(aid)
         options = self._options(aid)
         participants = [r["id"] for r in self.db.execute("SELECT id FROM groups WHERE activity_id=?", (aid,))]
         eligible = []
@@ -418,7 +437,9 @@ class ExtraFeatures:
                 row = self.db.execute("SELECT misses FROM group_progress WHERE group_id=?", (gid,)).fetchone()
                 if row and row["misses"] >= 3:
                     eligible.append(gid)
-                    self.db.execute("UPDATE group_progress SET misses=0 WHERE group_id=?", (gid,))
+        self.db.execute('INSERT OR IGNORE INTO fairness_baselines VALUES(?,?,0)',(aid,'{}'))
+        self.db.execute('INSERT INTO fairness_rounds VALUES(?,?,?,?,0)',(aid,index,json.dumps(participants),json.dumps(eligible)))
+        self._recompute_fairness(aid)
         now = time.time()
         questions = list(self._units(aid).values())[index]
         self.db.executemany('UPDATE question_meta SET opened_at=? WHERE activity_id=? AND question_id=?',
@@ -432,15 +453,23 @@ class ExtraFeatures:
         if not options["round_open"]:
             return
         units = list(self._units(aid).values())
-        questions = units[options["round_index"]]
-        first = self._winner_rows(aid).get(questions[0])
-        winner = first["group_id"] if first else None
-        for gid in json.loads(options["participants_json"]):
-            self.db.execute("INSERT OR IGNORE INTO group_progress(group_id) VALUES(?)", (gid,))
-            self.db.execute("UPDATE group_progress SET misses=CASE WHEN ? THEN 0 ELSE misses+1 END WHERE group_id=?", (gid == winner, gid))
+        self.db.execute('UPDATE fairness_rounds SET closed=1 WHERE activity_id=? AND round_index=?',(aid,options['round_index']))
+        self._recompute_fairness(aid)
         self.db.execute("UPDATE activity_options SET round_open=0,deadline=NULL WHERE activity_id=?", (aid,))
         if options["round_index"] == len(units)-1:
             self.db.execute("UPDATE activities SET phase='results',ended_at=? WHERE id=?", (time.time(), aid))
+
+    def _recompute_fairness(self, aid):
+        baseline=self.db.execute('SELECT counts_json FROM fairness_baselines WHERE activity_id=?',(aid,)).fetchone()
+        counts=json.loads(baseline['counts_json']) if baseline else {}
+        units=list(self._units(aid).values()); winners=self._winner_rows(aid)
+        for row in self.db.execute('SELECT * FROM fairness_rounds WHERE activity_id=? ORDER BY round_index',(aid,)):
+            for gid in json.loads(row['consumed_json']): counts[gid]=0
+            if not row['closed']: continue
+            first=winners.get(units[row['round_index']][0]); winner=first['group_id'] if first else None
+            for gid in json.loads(row['participants_json']):
+                counts[gid]=0 if gid==winner else counts.get(gid,0)+1
+        self.db.executemany('INSERT INTO group_progress(group_id,misses) VALUES(?,?) ON CONFLICT(group_id) DO UPDATE SET misses=excluded.misses',counts.items())
 
     @expire_first
     def round_action(self, token, aid, action):
@@ -483,6 +512,8 @@ class ExtraFeatures:
         state["units"] = [{"id": u, "questions": qs} for u, qs in units.items()]
         if session['role'] == 'student': state['own_score'] = self._own_score(state['answers'],units)
         state["settings"] = {k: options[k] for k in ("mode", "fairness", "duration_seconds")}
+        baseline=self.db.execute('SELECT legacy FROM fairness_baselines WHERE activity_id=?',(state['id'],)).fetchone()
+        state['settings']['legacy_fairness']=bool(baseline and baseline['legacy'] and options['fairness'])
         state["server_time"] = time.time()
         state["round"] = {k: options[k] for k in ("round_index", "round_open", "round_started_at", "priority_until", "deadline")}
         state["round"]["unit_id"] = list(units)[options["round_index"]] if options["round_index"] >= 0 else None
@@ -500,6 +531,8 @@ class ExtraFeatures:
                                for r in self.db.execute("SELECT question_id,reference_answer FROM question_meta WHERE activity_id=?", (state["id"],))
                                if session['role'] == 'teacher' or self._reviewable(state,r['question_id'])}
         if state["phase"] == "results":
+            pending=self.db.execute("SELECT COUNT(*) FROM answers WHERE activity_id=? AND verdict='pending'",(state['id'],)).fetchone()[0]
+            state['grading']={'pending_answers':pending,'complete':pending==0}
             state["scoreboard"] = self._scoreboard(state['id'])
             if session["role"] == "student": state["report"] = self._report(state)
         return state

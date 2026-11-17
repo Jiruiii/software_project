@@ -300,9 +300,11 @@ function renderMonitor(state) {
   table.append(thead, body); wrap.append(table);
 }
 function renderResults(state) {
-  const key = JSON.stringify(state.results); if (lastResults === key) return; lastResults = key;
+  const selected=state.role==='teacher'?$('monitor-question').value:'';
+  const key = JSON.stringify([state.results,selected]); if (lastResults === key) return; lastResults = key;
   const list = el("div", undefined, "results-list");
   for (const result of state.results) {
+    if(selected && result.question_id!==selected) continue;
     const row = el("div", undefined, "result-row"), detail = el("div");
     row.append(el("span", `第 ${result.question_id} 題`, "result-number"));
     detail.append(el("div", result.winner ? `${result.winner.group_name} · 搶答成功（${verdictNames[result.winner.verdict]}）` : result.has_answers ? "無成功組別（候選已判錯）" : "無人作答", "winner"));
@@ -364,6 +366,15 @@ function renderState(state) {
   renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
+  const provisional=ended && !state.grading.complete;
+  $('grading-status').hidden=!ended;
+  if(ended) {
+    $('grading-message').textContent=provisional?`作答已結束 · 暫時成績：還有 ${state.grading.pending_answers} 筆答案待批改，分數與排名可能改變。`:'作答已結束 · 批改完成，目前沒有待批改答案。';
+    $('scoreboard').querySelector('h3').textContent=`小組得分排行（${provisional?'暫時成績':'批改完成'}）`;
+    $('group-report').querySelector('h3').textContent=`本組學習報告（${provisional?'暫時成績':'批改完成'}）`;
+  }
+  $('grading-review').hidden=!teacher || !provisional;
+  $('own-score').querySelector('span').textContent=provisional?'本組暫時成績':'本組目前總分';
   $('activity').classList.toggle('teacher-view',teacher);
   renderQuestionSettings(state);
   $('own-score').hidden=teacher;
@@ -375,9 +386,9 @@ function renderState(state) {
     $('own-score-pending').textContent=waiting.length?waiting.join('；'):'目前沒有待公布或待批改項目';
   }
   $('scoreboard').hidden=!ended;
-  if (ended && $('scoreboard').dataset.values!==JSON.stringify(state.scoreboard)) {
-    $('scoreboard').dataset.values=JSON.stringify(state.scoreboard);
-    const table=el('table'), head=el('tr'); head.append(el('th','名次'),el('th','組別'),el('th','總分')); table.append(head);
+  if (ended && $('scoreboard').dataset.values!==JSON.stringify([state.scoreboard,provisional])) {
+    $('scoreboard').dataset.values=JSON.stringify([state.scoreboard,provisional]);
+    const table=el('table'), head=el('tr'); head.append(el('th','名次'),el('th','組別'),el('th',provisional?'暫時總分':'總分')); table.append(head);
     for (const score of state.scoreboard) {const row=el('tr'); row.append(el('td',score.rank),el('th',score.group_name),el('td',score.score)); table.append(row);}
     $('scoreboard-table').replaceChildren(table);
   }
@@ -437,6 +448,7 @@ function renderState(state) {
     $("sheet-export").textContent = '重試同步';
   }
   if (teacher) {syncMonitorFilter(state); renderMonitor(state);} else renderCards(state);
+  if(teacher && state.settings.legacy_fairness) $('round-status').textContent+=' · 舊活動缺少歷史保底紀錄，保留既有累計並從更新後接續計算。';
   if (ended) renderResults(state);
   renderTeacherWorkspace(state);
   updateInputs();
@@ -468,7 +480,7 @@ async function poll() {await refresh(); setTimeout(poll, 700);}
 showView(); connection(true); poll();
 let reportKey = '';
 const referenceDrafts = new Map();
-let referenceActivity = '', referenceRound = '';
+let referenceActivity = '';
 function referenceDraft(state, q) {
   const key=`${state.id}:${q}`;
   if(!referenceDrafts.has(key)) referenceDrafts.set(key,{answer:'',override:false,dirty:false,saving:false});
@@ -482,22 +494,18 @@ function referenceDraft(state, q) {
 function renderTeacherReference(state) {
   const questions=state.reviewable_questions;
   if(!questions.length) return;
-  const select=$('reference-question'), activityChanged=referenceActivity!==state.id;
-  const round=`${state.id}:${state.phase}:${state.round.unit_id}:${state.round.round_open}`;
-  let selected=select.value;
-  if(activityChanged || round!==referenceRound) {
-    const currentQuestions=state.units.find(u=>u.id===state.round.unit_id)?.questions || [];
-    selected=currentQuestions.find(q=>questions.includes(q)) || (activityChanged ? questions[0] : selected);
-  }
+  const q=$('monitor-question').value, activityChanged=referenceActivity!==state.id;
   if(activityChanged) $('references').open=false;
-  referenceActivity=state.id; referenceRound=round;
-  const listKey=JSON.stringify([state.id,questions]);
-  if(select.dataset.key!==listKey) {
-    select.replaceChildren(...questions.map(q=>{const option=el('option',`第 ${q} 題`);option.value=q;return option;}));
-    select.dataset.key=listKey;
+  referenceActivity=state.id;
+  const available=questions.includes(q);
+  $('reference-form').hidden=!available;
+  $('reference-selection-help').hidden=available;
+  if(!available) {
+    $('reference-summary').textContent='老師正確答案（選填）';
+    $('reference-selection-help').textContent=q?'此題尚未結束，關題後才能填寫老師答案。':'請在上方選擇一個已結束的題目，再填寫老師答案。';
+    return;
   }
-  select.value=questions.includes(selected)?selected:questions[0];
-  const q=select.value, draft=referenceDraft(state,q);
+  const draft=referenceDraft(state,q);
   if($('reference-answer').value!==draft.answer) $('reference-answer').value=draft.answer;
   $('reference-override').checked=draft.override;
   $('reference-override-field').hidden=!state.source;
@@ -508,16 +516,16 @@ function renderTeacherReference(state) {
 }
 function captureReferenceDraft() {
   if(current?.role!=='teacher') return;
-  const draft=referenceDraft(current,$('reference-question').value);
+  const draft=referenceDraft(current,$('monitor-question').value);
   draft.answer=$('reference-answer').value; draft.override=$('reference-override').checked; draft.dirty=true;
   renderTeacherReference(current);
 }
 $('reference-answer').oninput=captureReferenceDraft;
 $('reference-override').onchange=captureReferenceDraft;
-$('reference-question').onchange=()=>renderTeacherReference(current);
 $('reference-form').onsubmit=event=>{
   event.preventDefault();
-  const state=current, q=$('reference-question').value, draft=referenceDraft(state,q);
+  const state=current, q=$('monitor-question').value, draft=referenceDraft(state,q);
+  if(!state.reviewable_questions.includes(q)) {notice('請先選擇一個已結束的題目。');return;}
   const answer=draft.answer, override=draft.override;
   if(override && !answer.trim()) {notice('請先填寫老師答案，再勾選更新學習單。');$('reference-answer').focus();return;}
   action($('reference-save'),async()=>{
@@ -718,6 +726,7 @@ function renderTeacherWorkspace(state) {
   for(const id of ['replay','classification']) $(`tool-${id}`).hidden=true;
   $('result-actions').hidden=true;
   $('references').hidden=true;
+  $('teacher-question-filter').hidden=true;
   if(!teacher) return;
   const key=state.id+state.phase;
   if(teacherViewKey!==key) {teacherViewKey=key; teacherView=preparing?'settings':ended?'results':'monitor';}
@@ -733,6 +742,7 @@ function renderTeacherWorkspace(state) {
   $('phase-help').textContent={settings:'保留預設也能直接開始。需要逐題控制時，切換開放方式。',questions:'單選自動批改；簡答由老師批改。每題可獨立開關下注。',monitor:preparing?'分享上方代碼；同組同學使用相同組名加入。':'答案自動更新。選擇題目可集中查看與批改。',results:'這裡顯示搶答成果與總分。需要改判時，切換到「作答與批改」。',tools:'需要時再展開。這些工具不影響原本的搶答流程。'}[teacherView];
   for(const id of ['replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
   renderTeacherReference(state);
+  $('teacher-question-filter').hidden=preparing || !['monitor','results'].includes(teacherView);
   $('references').hidden=!state.reviewable_questions.length || !['monitor','results'].includes(teacherView);
   $('download-csv').hidden=!ended; $('sheet-export-controls').hidden=!state.source;
   $('start').textContent='開始搶答 →';
@@ -769,14 +779,14 @@ function syncMonitorFilter(state) {
     monitorKey=key; monitorFollow=true;
     $('monitor-question').replaceChildren(...['',...state.questions].map(q=>{const o=el('option',q?`第 ${q} 題`:'全部題目'); o.value=q; return o;}));
   }
-  if(monitorFollow) $('monitor-question').value=state.settings.mode==='sequential' && state.phase==='active' ? state.units.find(u=>u.id===state.round.unit_id)?.questions[0] || '' : '';
+  if(monitorFollow) $('monitor-question').value=state.settings.mode==='sequential' && state.round.unit_id!==null ? state.units.find(u=>u.id===state.round.unit_id)?.questions[0] || '' : '';
 }
 $('create-panel').append($('sheets-create'));
 $('source-manual').onclick=()=>setCreateSource('manual'); $('source-sheets').onclick=()=>setCreateSource('sheets');
 $('custom-questions').ontoggle=syncQuestionInput;
 $('go-questions').onclick=()=>showTeacherView('questions');
 for(const button of $('teacher-tabs').children) button.onclick=()=>showTeacherView(button.dataset.view);
-$('monitor-question').onchange=()=>{monitorFollow=false; renderMonitor(current);};
+$('monitor-question').onchange=()=>{monitorFollow=false;renderMonitor(current);renderTeacherReference(current);if(current.phase==='results')renderResults(current);};
 $('settings-form').oninput=$('settings-form').onchange=()=>{$('settings-form').dataset.dirty='true'; updateSetupStatus();};
 $('save-settings').onclick=()=>action($('save-settings'),async()=>{if(savingSettings) return; await saveAllSettings(); notice('所有設定已儲存。',true); await refresh();});
 $('result-actions').append($('download-csv'));
@@ -787,3 +797,6 @@ for(const [id,title] of [['replay','重播搶答過程'],['classification','比�
 }
 
 $('own-score').before($('references'));
+
+$('references').before($('teacher-question-filter'));
+$('grading-review').onclick=()=>{const q=current.answers.find(a=>a.verdict==='pending')?.question_id;if(q){monitorFollow=false;$('monitor-question').value=q;showTeacherView('monitor');renderMonitor(current);}};

@@ -29,3 +29,5 @@ select{color:var(--ink);background:#fdfefa}summary{cursor:pointer;outline-offset
 .teacher-reference{margin:18px 0}.teacher-reference>summary{cursor:pointer;color:var(--green);font-weight:700;line-height:1.6}.teacher-reference textarea{width:100%;box-sizing:border-box;resize:vertical}.teacher-reference .form-actions{align-items:center;flex-wrap:wrap;gap:12px}
 
 .published-reference{margin:16px 0 8px;padding:14px 16px;border-left:4px solid var(--green);border-radius:8px;background:#edf4e9;color:var(--ink)}.published-reference strong{font-size:13px;color:var(--green)}.published-reference .reference-text{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
+
+.shared-question-filter{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:18px 0}.shared-question-filter label{margin:0}.shared-question-filter select{max-width:100%;width:auto}.grading-status{margin:16px 0;padding:14px 18px;border:1px solid var(--line);border-radius:10px;background:#f4f3df}.grading-status p{margin:0 0 8px;line-height:1.6}

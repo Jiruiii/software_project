@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "timestampUtc": "2026-11-17T13:53:56.330533+00:00",
+  "checks": [
+    "single-question-selector",
+    "round-follow",
+    "closed-only-editing",
+    "per-question-drafts",
+    "all-selection-safe",
+    "provisional-results",
+    "student-provisional",
+    "review-shortcut",
+    "automatic-completion",
+    "undo-provisional",
+    "mobile-layout"
+  ],
+  "pageErrors": []
+}

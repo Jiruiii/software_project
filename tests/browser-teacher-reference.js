@@ -26,7 +26,7 @@ async (page) => {
   await post(path+'/answers',{question:'1',answer:'學生答案',stake:2},student);
   await page.locator('#close-round').click();await synced(0);
   await page.locator('#references > summary').click();
-  check(await page.locator('#reference-question').inputValue()==='1','Wrong default question');
+  check(await page.locator('#monitor-question').inputValue()==='1','Wrong default question');
   await page.locator('#reference-answer').fill('老師正解');
   await page.locator('#reference-override').check();
   await page.evaluate(async()=>{await refresh();await refresh();});
@@ -59,11 +59,11 @@ async (page) => {
   check(await studentPage.locator('.answer-field[data-question="2"] .published-reference').isHidden(),'Next reference published early');
   previous=await page.evaluate(()=>current.source.exported_at);
   await page.locator('#close-round').click();await synced(previous);
-  await page.waitForFunction(()=>document.querySelector('#reference-question').value==='2');
+  await page.waitForFunction(()=>document.querySelector('#monitor-question').value==='2');
   await page.locator('#reference-answer').fill('無人作答的正解');
-  await page.locator('#reference-question').selectOption('1');
+  await page.locator('#monitor-question').selectOption('1');
   check(await page.locator('#reference-answer').inputValue()==='老師正解','Wrong per-question answer');
-  await page.locator('#reference-question').selectOption('2');
+  await page.locator('#monitor-question').selectOption('2');
   check(await page.locator('#reference-answer').inputValue()==='無人作答的正解','Switch erased draft');
   await page.locator('#reference-override').check();previous=await page.evaluate(()=>current.source.exported_at);
   await page.locator('#reference-save').click();await synced(previous);
@@ -91,7 +91,7 @@ async (page) => {
   check(await page.locator('#references').isHidden(),'All-mode reference before end');
   check(await studentPage.locator('.published-reference:visible').count()===0,'All-mode reference early');
   await page.locator('#end').click();await page.waitForFunction(()=>current.phase==='results');
-  await page.locator('#references > summary').click();await page.locator('#reference-question').selectOption('2');
+  await page.locator('#references > summary').click();await page.locator('#monitor-question').selectOption('2');
   check(await page.locator('#reference-override-field').isHidden(),'Manual activity has sheet option');
   await page.locator('#reference-answer').fill('全題補充答案');await page.locator('#reference-save').click();
   await page.waitForFunction(()=>current.references['2']==='全題補充答案');
