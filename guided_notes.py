@@ -226,7 +226,7 @@ def parse_grid(grid):
             "fingerprint": fingerprint(grid, targets)}
 
 
-def prepare_export(source, grid, winners):
+def prepare_export(source, grid, winners, questions=None):
     if grid.title != source["sheet_title"] or (source.get("sheet_id") is not None and grid.sheet_id != source["sheet_id"]):
         raise QuizError(409, "來源工作表已變更，請重新匯入。")
     if fingerprint(grid, source["targets"]) != source["fingerprint"]:
@@ -234,6 +234,8 @@ def prepare_export(source, grid, winners):
     requests, expected = [], {}
     for target in source["targets"]:
         q, row, col = target["question"], target["row"], target["col"]
+        if questions is not None and q not in questions:
+            continue
         value = grid.cells.get((row,col), "")
         winner = winners.get(q)
         # Restore only our own previous export when its winner is disqualified.
@@ -245,6 +247,8 @@ def prepare_export(source, grid, winners):
         if winner is None:
             continue
         expected[q] = winner
+        if value == winner:
+            continue
         requests.append({"updateCells": {"start": {"sheetId": grid.sheet_id, "rowIndex": row, "columnIndex": col},
                         "rows": [{"values": [{"userEnteredValue": {"stringValue": winner}}]}], "fields": "userEnteredValue"}})
     return requests, expected

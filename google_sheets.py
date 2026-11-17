@@ -205,9 +205,12 @@ class SheetsWorkflow:
             if len(found) != 1:
                 raise QuizError(409, "來源工作表已移除或改名，請重新匯入。")
             grid = found[0]
-            requests, expected = prepare_export(source, grid, winners)
+            requests, expected = prepare_export(source, grid, winners, source.get('_closed_questions'))
             if not requests:
-                return {"written":0, "message":"沒有搶答成功答案，原表未修改。"}
+                if not self.service.record_export(token, aid, expected, grid.sheet_id):
+                    raise QuizError(409, "寫回期間老師判定已改變，請重新寫回最新結果。")
+                return {"written":len(expected), "message":f"已核對 {len(expected)} 題答案，學習單無須修改。",
+                        "url":f"https://docs.google.com/spreadsheets/d/{sid}/edit#gid={grid.sheet_id}"}
             self.google.request(owner, sid, {"requests":requests})
             after = [g for g in from_google(self.google.request(owner, sid)) if g.sheet_id == grid.sheet_id]
             if len(after) != 1 or fingerprint(after[0], source["targets"]) != source["fingerprint"]:

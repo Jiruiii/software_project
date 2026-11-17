@@ -281,16 +281,29 @@ class ExtraFeatures:
         with self.lock, self.db:
             self._auth(token, "teacher")
             activity = self._activity(aid)
-            if type(answer_id) is not int or verdict not in ("pending", "correct", "incorrect"):
+            if type(answer_id) is not int or verdict not in ("correct", "incorrect"):
                 raise QuizError(400, "請提供有效答案與判定。")
             answer = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND id=?", (aid, answer_id)).fetchone()
             if not answer: raise QuizError(404, "找不到這筆答案。")
             if not self._reviewable(activity, answer["question_id"]):
                 raise QuizError(409, "請先關閉此題或結束活動，再判定答案。")
-            if answer["verdict"] != verdict:
-                self.db.execute("UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?", (aid,))
             self.db.execute("UPDATE answers SET verdict=?,review_revision=review_revision+1 WHERE id=?", (verdict, answer_id))
+            self._invalidate_sheet_export(aid)
             return {"ok": True}
+
+    def _invalidate_sheet_export(self, aid):
+        row = self.db.execute('SELECT source_json FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone()
+        if not row: return
+        source = json.loads(row['source_json'])
+        activity = self._activity(aid)
+        winners = self._winner_rows(aid)
+        last = source.get('last_export', {})
+        desired = {t['question']:(winners[t['question']]['text'] if t['question'] in winners else t['original'])
+                   for t in source['targets'] if self._reviewable(activity,t['question']) and (t['question'] in winners or t['question'] in last)}
+        if desired != last:
+            self.db.execute('UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?', (aid,))
+            if aid in self.sheet_sync_states:
+                self.sheet_sync_states[aid] = {'state':'queued', 'message':'判定已更新，等待同步最新答案。'}
 
     @expire_first
     def review_batch(self, token, aid, question, selections, verdict):
@@ -323,7 +336,7 @@ class ExtraFeatures:
             batch_id = secrets.token_hex(16)
             self.db.execute("INSERT INTO review_batches(id,activity_id,owner,changes_json) VALUES(?,?,?,?)",
                             (batch_id, aid, owner, json.dumps(changes)))
-            self.db.execute("UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?", (aid,))
+            self._invalidate_sheet_export(aid)
             return {"batch_id":batch_id, "count":len(changes)}
 
     @expire_first
@@ -347,7 +360,7 @@ class ExtraFeatures:
             self.db.executemany("UPDATE answers SET verdict=?,review_revision=review_revision+1 WHERE id=?",
                                 [(c["before"], c["id"]) for c in changes])
             self.db.execute("UPDATE review_batches SET undone=1 WHERE id=?", (batch_id,))
-            self.db.execute("UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?", (aid,))
+            self._invalidate_sheet_export(aid)
             return {"ok":True, "count":len(changes)}
 
     def _new_options(self, aid):

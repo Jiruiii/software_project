@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "timestampUtc": "2026-11-17T12:29:45.957009+00:00",
+  "checks": [
+    "two-verdict-controls",
+    "round-close-sync",
+    "fallback-second",
+    "all-wrong-restore",
+    "correct-restores-first",
+    "choice-skips-wrong",
+    "active-sync-panel",
+    "mobile-layout"
+  ],
+  "pageErrors": [],
+  "verifiedWriteSequence": [
+    "最快答案",
+    "第二快答案",
+    "",
+    "最快答案",
+    "正解"
+  ],
+  "googleMode": "in-memory REST fixture; no live Google write"
+}

@@ -29,6 +29,7 @@ class QuizService(ExtraFeatures):
         self.password_hash = hashlib.sha256(teacher_password.encode()).digest()
         self.lock = threading.RLock()
         self.login_attempts = {}
+        self.sheet_sync_states = {}
         if str(database) != ":memory:":
             Path(database).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(database, check_same_thread=False)
@@ -89,23 +90,28 @@ class QuizService(ExtraFeatures):
         with self.lock:
             self._auth(token, "teacher")
             activity = self._activity(aid)
-            if activity["phase"] != "results":
-                raise QuizError(409, "請先結束搶答，再寫回答案。")
+            closed = [r['id'] for r in self.db.execute('SELECT id FROM questions WHERE activity_id=? ORDER BY ordinal', (aid,))
+                      if self._reviewable(activity, r['id'])]
+            if not closed:
+                raise QuizError(409, "請先關閉一題或結束搶答，再寫回答案。")
             row = self.db.execute("SELECT source_json FROM sheet_sources WHERE activity_id=?",(aid,)).fetchone()
             if not row:
                 raise QuizError(409, "這是手動題號活動，沒有可寫回的 Google Sheet。")
-            winners = {q: a["text"] for q, a in self._winner_rows(aid).items()}
-            return json.loads(row["source_json"]), winners
+            winners = {q: a["text"] for q, a in self._winner_rows(aid).items() if q in closed}
+            source = json.loads(row["source_json"])
+            source['_closed_questions'] = closed
+            return source, winners
 
     def record_export(self, token, aid, expected, sheet_id):
         with self.lock, self.db:
             self._auth(token, "teacher")
             source = json.loads(self.db.execute("SELECT source_json FROM sheet_sources WHERE activity_id=?",(aid,)).fetchone()[0])
-            source["last_export"] = expected
+            source.setdefault("last_export", {}).update(expected)
             source["sheet_id"] = sheet_id
-            winners=self._winner_rows(aid)
+            activity=self._activity(aid)
+            winners={q:a for q,a in self._winner_rows(aid).items() if self._reviewable(activity,q)}
             desired={t['question']:(winners[t['question']]['text'] if t['question'] in winners else t['original'])
-                     for t in source['targets'] if t['question'] in winners or t['question'] in expected}
+                     for t in source['targets'] if self._reviewable(activity,t['question']) and (t['question'] in winners or t['question'] in expected)}
             current = desired == expected
             self.db.execute("UPDATE sheet_sources SET source_json=?,exported_at=? WHERE activity_id=?",
                             (json.dumps(source,ensure_ascii=False),time.time() if current else None,aid))
@@ -277,6 +283,7 @@ class QuizService(ExtraFeatures):
                     info = json.loads(source["source_json"])
                     activity["source"] = {"sheet_title":info["sheet_title"], "url":f"https://docs.google.com/spreadsheets/d/{info['spreadsheet_id']}/edit",
                                           "exported_at":source["exported_at"], "export_stale":bool(info.get("last_export")) and not source["exported_at"]}
+                    activity["source"]["sync"] = self.sheet_sync_states.get(aid, {'state':'idle', 'message':'連線 Google 後，關題會自動同步學習單。'})
                 activity["groups"] = [dict(r) for r in self.db.execute(
                     "SELECT id,name FROM groups WHERE activity_id=? ORDER BY name", (aid,))]
                 activity["answers"] = [dict(r) for r in self.db.execute(

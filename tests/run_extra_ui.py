@@ -21,7 +21,7 @@ from guided_notes import from_xlsx, parse_grid
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui','batch-review','question-timing'],default='extras')
+    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui','batch-review','question-timing','auto-sync'],default='extras')
     suite=parser.parse_args().suite
     output = ROOT/"output/playwright"; output.mkdir(parents=True, exist_ok=True)
     service = QuizService(":memory:", "extras-test-only")
@@ -47,8 +47,17 @@ def main():
         service.db.execute("UPDATE answers SET elapsed_basis='activity' WHERE activity_id=? AND question_id='1'", (aid,))
         service.db.execute("UPDATE question_meta SET opened_at=NULL WHERE activity_id=? AND question_id='1'", (aid,))
         service.db.commit()
+    connection = GoogleConnection(ROOT/"tmp/not-configured-extras.json")
+    if suite == 'auto-sync':
+        from test_google_sheets import FakeGoogle, COPY_URL
+        connection = FakeGoogle()
+        flow = SheetsWorkflow(service, connection)
+        activity = flow.import_activity(teacher, flow.preview(teacher, COPY_URL)['preview_id'], '自動同步驗收')
+        service.configure(teacher, activity['id'], 'sequential')
+        service.question_settings(teacher, activity['id'], '2', True,
+                                  [{'question':'2','type':'choice','options':['正解','錯誤選項'],'correct_index':0}])
     service.logout(teacher)
-    server = make_server(service, 0, SheetsWorkflow(service, GoogleConnection(ROOT/"tmp/not-configured-extras.json")))
+    server = make_server(service, 0, SheetsWorkflow(service, connection))
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
     npx = shutil.which("npx.cmd" if os.name == "nt" else "npx")
     if not npx: raise RuntimeError("Node.js/npx is required")
@@ -63,6 +72,13 @@ def main():
         (output/f"{suite}-browser.log").write_text(result.stdout+result.stderr, encoding="utf-8")
         if result.returncode or "### Result\n" not in result.stdout: raise RuntimeError(f"Browser failed; see {suite}-browser.log")
         report.update(json.JSONDecoder().raw_decode(result.stdout.split("### Result\n", 1)[1].lstrip())[0])
+        if suite == 'auto-sync':
+            written = [r['updateCells']['rows'][0]['values'][0]['userEnteredValue']['stringValue']
+                       for _, body in connection.writes for r in body['requests']]
+            if written != ['最快答案', '第二快答案', '', '最快答案', '正解']:
+                raise AssertionError('Unexpected sheet write sequence: '+repr(written))
+            report['verifiedWriteSequence'] = written
+            report['googleMode'] = 'in-memory REST fixture; no live Google write'
         print(json.dumps(report, ensure_ascii=True, indent=2))
         return 0 if report["passed"] else 1
     finally:

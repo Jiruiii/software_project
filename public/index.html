@@ -83,7 +83,7 @@
           <div id="teacher-controls" hidden><button id="save-settings" class="secondary">儲存設定</button><button id="start" class="primary">開始搶答 →</button><button id="end" class="danger" hidden>結束活動</button></div>
           <div id="round-controls" hidden><button id="close-round" class="danger wide">關閉本題</button><button id="next-round" class="primary wide">開啟下一題 →</button></div>
           <p id="session-rule" class="sidebar-note"></p>
-          <div id="sheet-export-controls" hidden><p id="source-name" class="sidebar-note"></p><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟來源學習單 ↗</a><button id="sheet-export" class="primary wide">寫回成功答案 →</button><p class="field-hint">只修改原學習單的答案格。匯出期間請勿移動原表列欄；Google 尚未連線時，先返回活動清單連線。</p></div>
+          <div id="sheet-export-controls" class="sheet-sync-panel" hidden><p id="source-name" class="sidebar-note"></p><p id="sheet-sync-status" role="status"></p><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟來源學習單 ↗</a><button id="sheet-export" class="secondary" hidden>重試同步</button><p class="field-hint">每輪關題後自動寫入最快未判錯組別；改判會自動遞補。Google 尚未連線時，先返回活動清單連線。同步期間請勿移動原表列欄。</p></div>
         </aside>
         <div class="session-main">
           <nav id="teacher-tabs" class="workspace-nav" aria-label="老師工作區" hidden><button data-view="settings">1 活動設定</button><button data-view="questions">2 題目與計分</button><button data-view="monitor">作答與批改</button><button data-view="results">搶答結果</button><button data-view="tools">更多工具</button></nav>

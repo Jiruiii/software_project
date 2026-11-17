@@ -22,6 +22,7 @@ class FakeGoogle:
         self.data = payload(single()); self.writes=[]; self.fail=False; self.ignore=False
 
     def read(self, owner, sid): return from_google(copy.deepcopy(self.data))
+    def status(self, owner): return {'configured':True, 'connected':True}
 
     def request(self, owner, sid, body=None):
         if body is None: return copy.deepcopy(self.data)

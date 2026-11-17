@@ -1,7 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const phaseNames = {preparing: "準備中", active: "作答中", results: "結果"};
-const verdictNames = {pending:"未判定", withheld:"待關題公布", correct:"正確", incorrect:"錯誤", unanswered:"未作答"};
+const verdictNames = {pending:"待批改", withheld:"待關題公布", correct:"正確", incorrect:"錯誤", unanswered:"未作答"};
 let auth = null, activityId = null, current = null, generation = 0;
 let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", lastResults = "", lastList = "";
 const pendingAnswers = new Set();
@@ -157,7 +157,7 @@ $("sheet-import").onclick = () => action($("sheet-import"), async () => {
   sheetPreview = null; $("sheet-preview").hidden = true; selectActivity(result.id); await refresh();
 });
 $("sheet-export").onclick = () => action($("sheet-export"), async () => {
-  const result = await api(`/api/activities/${activityId}/export`, {}); notice(result.message, true); await refresh();
+  const result = await api(`/api/activities/${activityId}/sheet-sync`, {}); notice(result.message, true); await refresh();
 });
 for (const kind of ["start", "end"]) $(kind).onclick = () => action($(kind), async () => {
   if (savingSettings) return;
@@ -278,7 +278,7 @@ function renderMonitor(state) {
         cell.append(content, el("small", `${timeText(answer.received_at)} · ${answerElapsedText(answer)} · ${answer.stake===0?'不押':`下注 ${answer.stake}`} · ${verdictNames[answer.verdict]}`));
         if (state.reviewable_questions.includes(q)) {
           const controls = el("div", undefined, "review-controls");
-          for (const verdict of ['correct','incorrect','pending']) {
+          for (const verdict of ['correct','incorrect']) {
             const button = el('button', verdictNames[verdict], 'text-button'); button.dataset.verdict = verdict;
             button.setAttribute('aria-label', `${group.name} 第 ${q} 題判為${verdictNames[verdict]}`);
             button.disabled = answer.verdict === verdict;
@@ -424,9 +424,13 @@ function renderState(state) {
     (priorityLeft && !ended ? ` · 保底先答剩 ${priorityLeft} 秒${state.round.own_priority ? "（本組可先答）" : ""}` : "");
   $("sheet-export-controls").hidden = !teacher || !state.source;
   if (teacher && state.source) {
-    $("source-name").textContent = `來源：${state.source.sheet_title}` + (state.source.export_stale ? " · 判定已變更，請重新寫回" : state.source.exported_at ? " · 已核對寫回" : "");
+    const sync=state.source.sync || {state:'idle',message:'關題後自動同步學習單。'};
+    $("source-name").textContent = `來源：${state.source.sheet_title}`;
+    $('sheet-sync-status').textContent=sync.message;
+    $('sheet-sync-status').dataset.state=sync.state;
     $("source-link").href = state.source.url;
-    $("sheet-export").hidden = !ended;
+    $("sheet-export").hidden = !['error','needs_auth'].includes(sync.state);
+    $("sheet-export").textContent = '重試同步';
   }
   if (teacher) {syncMonitorFilter(state); renderMonitor(state);} else renderCards(state);
   if (ended) renderResults(state);
@@ -664,7 +668,7 @@ function renderTeacherWorkspace(state) {
   for(const button of $('teacher-tabs').children) {
     button.hidden=!allowed.includes(button.dataset.view);
     button.setAttribute('aria-current',button.dataset.view===teacherView?'page':'false');
-    if(button.dataset.view==='monitor') button.textContent=preparing?`已加入小組（${state.groups.length}）`:`作答與批改（${state.answers.filter(a=>a.verdict==='pending').length} 待判定）`;
+    if(button.dataset.view==='monitor') button.textContent=preparing?`已加入小組（${state.groups.length}）`:`作答與批改（${state.answers.filter(a=>a.verdict==='pending').length} 待批改）`;
   }
   const sections={settings:['settings-form'],questions:['question-settings'],monitor:['teacher-monitor'],results:['results','scoreboard','result-actions'],tools:[]};
   for(const id of ['settings-form','question-settings','teacher-monitor','results','scoreboard','result-actions']) $(id).hidden=!sections[teacherView]?.includes(id);
@@ -716,7 +720,8 @@ for(const button of $('teacher-tabs').children) button.onclick=()=>showTeacherVi
 $('monitor-question').onchange=()=>{monitorFollow=false; renderMonitor(current);};
 $('settings-form').oninput=$('settings-form').onchange=()=>{$('settings-form').dataset.dirty='true'; updateSetupStatus();};
 $('save-settings').onclick=()=>action($('save-settings'),async()=>{if(savingSettings) return; await saveAllSettings(); notice('所有設定已儲存。',true); await refresh();});
-$('result-actions').append($('download-csv'),$('sheet-export-controls'));
+$('result-actions').append($('download-csv'));
+$('teacher-tabs').after($('sheet-export-controls'));
 for(const [id,title] of [['references','提供參考答案'],['replay','重播搶答過程'],['classification','比較相似答案']]) {
   const section=$(id), wrapper=el('details',undefined,'tool-disclosure panel'); wrapper.id=`tool-${id}`; wrapper.hidden=true;
   const summary=el('summary',title); section.before(wrapper); wrapper.append(summary,section);

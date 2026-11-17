@@ -1,0 +1,50 @@
+async (page) => {
+  const check=(v,m)=>{if(!v) throw new Error(m);}, errors=[];
+  page.on('pageerror',e=>errors.push(String(e)));
+  await page.setViewportSize({width:1280,height:900});
+  await page.locator('#choose-teacher').click();
+  await page.locator('#teacher-password').fill('extras-test-only');
+  await page.locator('#login-form button').click();
+  await page.locator('.activity-card').filter({hasText:'自動同步驗收'}).click();
+  await page.locator('#start').waitFor({state:'visible'});
+  const session=await page.evaluate(()=>({token:auth.token,id:activityId}));
+  const base=new URL(page.url()).origin, path=`/api/activities/${session.id}`;
+  const post=async(route,data,token=session.token)=>{
+    const r=await page.request.post(base+route,{data,headers:{Authorization:'Bearer '+token}});
+    check(r.ok(),`HTTP ${r.status()}: ${await r.text()}`);return r.json();
+  };
+  const code=await page.locator('#session-code').innerText();
+  const a=(await post('/api/join',{code,group:'最快組'})).token;
+  const b=(await post('/api/join',{code,group:'第二組'})).token;
+  await page.locator('#start').click();
+  await page.locator('#close-round').waitFor({state:'visible'});
+  await post(path+'/answers',{question:'1',answer:'最快答案',stake:3},a);
+  await post(path+'/answers',{question:'1',answer:'第二快答案',stake:2},b);
+  const synced=async previous=>page.waitForFunction(previous=>current.source.sync.state==='synced' && current.source.exported_at>previous,previous);
+  await page.locator('#close-round').click(); await synced(0);
+  check(await page.locator('#sheet-export-controls').isVisible(),'Sync panel hidden during active activity');
+  check(await page.locator('#monitor-table [data-verdict="pending"]').count()===0,'Pending action present');
+  check(!(await page.locator('#activity').innerText()).includes('未判定'),'Teacher still shows old pending wording');
+  const grade=async(group,verdict)=>{
+    const previous=await page.evaluate(()=>current.source.exported_at);
+    await page.getByRole('button',{name:`${group} 第 1 題判為${verdict}`,exact:true}).click();
+    await synced(previous);
+  };
+  await grade('最快組','錯誤');
+  await page.evaluate(()=>window.scrollTo(0,0));
+  await page.screenshot({path:'output/playwright/auto-sync-desktop.png',fullPage:true});
+  await grade('第二組','錯誤');
+  await grade('最快組','正確');
+  await page.locator('#next-round').click();
+  await page.waitForFunction(()=>current.round.unit_id==='2');
+  await post(path+'/answers',{question:'2',answer:'錯誤選項',stake:3},a);
+  await post(path+'/answers',{question:'2',answer:'正解',stake:2},b);
+  const previous=await page.evaluate(()=>current.source.exported_at);
+  await page.locator('#close-round').click(); await synced(previous);
+  check(await page.locator('#monitor-table [data-verdict="pending"]').count()===0,'Choice pending action present');
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:'output/playwright/auto-sync-mobile.png',fullPage:true});
+  check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
+  check(!errors.length,errors.join('\n'));
+  return {passed:true,checks:['two-verdict-controls','round-close-sync','fallback-second','all-wrong-restore','correct-restores-first','choice-skips-wrong','active-sync-panel','mobile-layout'],pageErrors:errors};
+}

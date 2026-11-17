@@ -115,7 +115,8 @@ class ExtraTests(unittest.TestCase):
         self.assertEqual("B", self.s.snapshot(self.u, self.aid)["results"][0]["winner"]["group_name"])
         self.s.review(self.t, self.aid, ids[1], "incorrect")
         self.assertIsNone(self.s.snapshot(self.u, self.aid)["results"][0]["winner"])
-        for verdict in ("correct", "correct", "pending"):
+        with self.assertRaises(QuizError): self.s.review(self.t, self.aid, ids[0], "pending")
+        for verdict in ("correct", "correct"):
             self.s.review(self.t, self.aid, ids[0], verdict)
             winner = self.s.snapshot(self.u, self.aid)["results"][0]["winner"]
             self.assertEqual("A", winner["group_name"])

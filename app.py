@@ -11,13 +11,19 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 from quiz_service import QuizError, QuizService
 from google_sheets import SheetsWorkflow
+from sheet_auto_sync import SheetsAutoSync
 
 ROOT = Path(__file__).resolve().parent
 
 
 def make_server(service, port=8000, sheets=None):
     sheets = sheets or SheetsWorkflow(service)
+    auto_sync = SheetsAutoSync(sheets)
     class Handler(BaseHTTPRequestHandler):
+        def managed(self, result, token, aid):
+            auto_sync.watch(token, aid)
+            return self.respond(200, result)
+
         def setup(self):
             super().setup()
             self.connection.settimeout(10)
@@ -111,7 +117,7 @@ def make_server(service, port=8000, sheets=None):
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
                     return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv|settings|round|review|review-batch|review-undo|clusters|reference|report|bundle|question-settings))?", path)
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|sheet-sync|csv|settings|round|review|review-batch|review-undo|clusters|reference|report|bundle|question-settings))?", path)
             if match:
                 aid, action = match.groups()
                 if self.command == 'POST' and action == 'question-settings':
@@ -125,25 +131,30 @@ def make_server(service, port=8000, sheets=None):
                 if self.command == "POST" and action == "clusters":
                     return self.respond(200, service.clusters(token, aid, data.get("question")))
                 if self.command == "POST" and action == "review":
-                    return self.respond(200, service.review(token, aid, data.get("answer_id"), data.get("verdict")))
+                    return self.managed(service.review(token, aid, data.get("answer_id"), data.get("verdict")), token, aid)
                 if self.command == "POST" and action == "review-batch":
-                    return self.respond(200, service.review_batch(token, aid, data.get("question"), data.get("selections"), data.get("verdict")))
+                    return self.managed(service.review_batch(token, aid, data.get("question"), data.get("selections"), data.get("verdict")), token, aid)
                 if self.command == "POST" and action == "review-undo":
-                    return self.respond(200, service.undo_review_batch(token, aid, data.get("batch_id")))
+                    return self.managed(service.undo_review_batch(token, aid, data.get("batch_id")), token, aid)
                 if self.command == "POST" and action == "settings":
                     return self.respond(200, service.configure(token, aid, data.get("mode"), data.get("fairness", False), data.get("duration_seconds", 0)))
                 if self.command == "POST" and action == "round":
-                    return self.respond(200, service.round_action(token, aid, data.get("action")))
+                    return self.managed(service.round_action(token, aid, data.get("action")), token, aid)
                 if self.command == "GET" and action == "csv":
                     return self.respond(200, service.activity_csv(token, aid), "text/csv; charset=utf-8", "classroom-results.csv")
                 if self.command == "GET" and action is None:
-                    return self.respond(200, service.snapshot(token, aid))
+                    state = service.snapshot(token, aid)
+                    if state['role'] == 'teacher': auto_sync.watch(token, aid)
+                    return self.respond(200, state)
                 if self.command == "POST" and action in ("start", "end"):
-                    return self.respond(200, service.transition(token, aid, "active" if action == "start" else "results"))
+                    return self.managed(service.transition(token, aid, "active" if action == "start" else "results"), token, aid)
                 if self.command == "POST" and action == "answers":
                     return self.respond(200, service.submit(token, aid, data.get("question"), data.get("answer"), data.get("stake", 0)))
                 if self.command == "POST" and action == "export":
                     return self.respond(200, sheets.export(token, aid))
+                if self.command == "POST" and action == "sheet-sync":
+                    auto_sync.watch(token, aid, retry=True)
+                    return self.respond(200, {"message":"已排入同步，請查看學習單同步狀態。"})
             raise QuizError(404, "找不到此頁面或操作。")
 
         def handle_request(self):
@@ -165,7 +176,12 @@ def make_server(service, port=8000, sheets=None):
         request_queue_size = 128
         def service_actions(self):
             service.tick()
-    return TimedServer(("127.0.0.1", port), Handler)
+        def server_close(self):
+            auto_sync.close()
+            super().server_close()
+    server = TimedServer(("127.0.0.1", port), Handler)
+    auto_sync.start()
+    return server
 
 
 def main():

@@ -103,7 +103,9 @@ class BatchReviewTests(unittest.TestCase):
         for a in self.s.snapshot(self.t, self.aid)['answers']:
             if a['question_id'] == '2': self.s.review(self.t, self.aid, a['id'], 'correct')
         self.s.db.execute("INSERT INTO sheet_sources(activity_id,source_json,exported_at) VALUES(?,?,?)",
-                          (self.aid, json.dumps({'sheet_title':'test', 'spreadsheet_id':'test'}), 123)); self.s.db.commit()
+                          (self.aid, json.dumps({'sheet_title':'test', 'spreadsheet_id':'test',
+                              'targets':[{'question':'1', 'original':''}, {'question':'2', 'original':''}],
+                              'last_export':{'1':'地球是圓的', '2':'child'}}), 123)); self.s.db.commit()
         result = self.s.review_batch(self.t, self.aid, '1', self.selections(), 'incorrect')
         self.assertEqual([-1, -2, -3], self.scores())
         self.assertIsNone(self.s.db.execute('SELECT exported_at FROM sheet_sources').fetchone()[0])

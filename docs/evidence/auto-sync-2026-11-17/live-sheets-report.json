@@ -1,0 +1,28 @@
+{
+  "timestampUtc": "2026-11-17T12:32:15.474313+00:00",
+  "passed": true,
+  "scope": "Real Google API; new private test workbook only; real application HTTP routes",
+  "layouts": [
+    {
+      "layout": "原版範本",
+      "passed": true,
+      "closedRoundOnly": true,
+      "fallback": true,
+      "restoreWhenAllWrong": true,
+      "regradeRestoredFirst": true,
+      "unrelatedCellsAndFormatsPreserved": true,
+      "grouped": false
+    },
+    {
+      "layout": "題組移動列欄",
+      "passed": true,
+      "closedRoundOnly": true,
+      "fallback": true,
+      "restoreWhenAllWrong": true,
+      "regradeRestoredFirst": true,
+      "unrelatedCellsAndFormatsPreserved": true,
+      "grouped": true
+    }
+  ],
+  "finishedUtc": "2026-11-17T12:32:52.625929+00:00"
+}

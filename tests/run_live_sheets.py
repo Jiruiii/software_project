@@ -4,6 +4,7 @@ Uses the application's HTTP routes and OAuth implementation. User consent is
 interactive. Tokens stay in memory; this script never runs during unittest.
 """
 import copy
+import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -216,8 +217,51 @@ class Acceptance:
         check(normalized(self.snapshot()) == before, "Rejected conflict still changed workbook")
         return {"noAnswerNoWrite": True, "movedSourceRejected": True, "rejectedExportNoWrite": True}
 
+    def auto_round(self, title, sheet_id, targets):
+        activity = self.activity(title, targets)
+        prefix = '/api/activities/' + activity['id']
+        self.http(prefix+'/settings', {'mode':'sequential'})
+        users = [self.http('/api/join', {'code':activity['code'], 'group':name})['token'] for name in ['最快組','第二組']]
+        unit = self.http(prefix)['units'][0]
+        first = {q:'最快－'+q for q in unit['questions']}
+        second = {q:'第二快－'+q for q in unit['questions']}
+        before = self.snapshot()
+        original = cells(next(s for s in before['sheets'] if s['properties']['sheetId']==sheet_id))
+        expected_original = {q:original.get(targets[q],{}).get('userEnteredValue',{}).get('stringValue','') for q in unit['questions']}
+        def wait_for(values, previous=0):
+            deadline=time.monotonic()+90
+            while time.monotonic()<deadline:
+                state=self.http(prefix)
+                sync=state['source']['sync']
+                if sync['state'] in ('error','needs_auth'): raise AssertionError(sync['message'])
+                if sync['state']=='synced' and (state['source']['exported_at'] or 0)>previous:
+                    after=self.snapshot()
+                    actual=cells(next(s for s in after['sheets'] if s['properties']['sheetId']==sheet_id))
+                    for q,value in values.items():
+                        check(actual.get(targets[q],{}).get('userEnteredValue',{}).get('stringValue','')==value,'Auto sync cell mismatch')
+                    ignored=[(sheet_id,*targets[q]) for q in unit['questions']]
+                    check(normalized(before,ignored)==normalized(after,ignored),'Auto sync changed unrelated cells or formatting')
+                    return state
+                time.sleep(.5)
+            raise AssertionError('Automatic round sync timed out')
+        self.http(prefix+'/start', {})
+        self.http(prefix+'/bundle', {'unit':unit['id'],'answers':first,'stake':3}, users[0])
+        self.http(prefix+'/bundle', {'unit':unit['id'],'answers':second,'stake':2}, users[1])
+        check(normalized(before)==normalized(self.snapshot()),'Open round wrote answers early')
+        self.http(prefix+'/round', {'action':'close'})
+        state=wait_for(first)
+        ids=[next(a['id'] for a in state['answers'] if a['group_name']==name and a['question_id']==unit['questions'][0]) for name in ['最快組','第二組']]
+        for answer_id,verdict,expected in [(ids[0],'incorrect',second),(ids[1],'incorrect',expected_original),(ids[0],'correct',first)]:
+            previous=state['source']['exported_at']
+            self.http(prefix+'/review', {'answer_id':answer_id,'verdict':verdict})
+            state=wait_for(expected,previous)
+        return {'layout':title,'passed':True,'closedRoundOnly':True,'fallback':True,'restoreWhenAllWrong':True,'regradeRestoredFirst':True,'unrelatedCellsAndFormatsPreserved':True,'grouped':len(unit['questions'])>1}
+
 
 def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--auto-sync-only',action='store_true')
+    args=parser.parse_args()
     OUTPUT.mkdir(parents=True, exist_ok=True)
     report = {"timestampUtc": datetime.now(timezone.utc).isoformat(), "passed": False,
               "scope": "Real Google API; new private test workbook only; real application HTTP routes", "layouts": []}
@@ -247,13 +291,14 @@ def main():
             time.sleep(0.5)
         print("Google 已授權，建立測試表並複製官方單題範本……", flush=True)
         layouts = acceptance.setup()
-        for title, sheet_id, targets in layouts:
+        selected = [layouts[0], layouts[-1]] if args.auto_sync_only else layouts
+        for title, sheet_id, targets in selected:
             print("驗收：" + title, flush=True)
-            report["layouts"].append(acceptance.round_trip(title, sheet_id, targets))
+            report["layouts"].append(acceptance.auto_round(title, sheet_id, targets) if args.auto_sync_only else acceptance.round_trip(title, sheet_id, targets))
             path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         # Header-based sheets remain re-importable after answers replace blanks.
         # Marker-only sheets intentionally lose answered markers on writeback.
-        report["edgeCases"] = acceptance.edge_cases(*layouts[0])
+        if not args.auto_sync_only: report["edgeCases"] = acceptance.edge_cases(*layouts[0])
         report["passed"] = True
         print("真實 Google 驗收全部通過。測試表連結位於 output/live-sheets/test-workbook.txt。", flush=True)
         return 0

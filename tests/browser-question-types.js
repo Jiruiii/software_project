@@ -68,7 +68,8 @@ async (page) => {
     check(await a.evaluate(()=>current.own_score.total===-3),'pending added score');
     await page.locator('#close-round').click();
     await a.waitForFunction(()=>current.own_score.pending_units===1 && current.own_score.awaiting_close_units===0);
-    for(const [name,total] of [['正確',-1],['錯誤',-5],['未判定',-3],['正確',-1]]) {
+    check(await page.locator('#monitor-table [data-verdict="pending"]').count()===0,'Unexpected pending verdict control');
+    for(const [name,total] of [['正確',-1],['錯誤',-5],['正確',-1]]) {
       await page.getByRole('button',{name:`測試A組 第 3 題判為${name}`,exact:true}).click();
       await a.waitForFunction(total=>current.own_score.total===total,total);
     }

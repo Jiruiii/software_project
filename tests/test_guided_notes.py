@@ -89,7 +89,7 @@ class GuidedNotesTests(unittest.TestCase):
             changed=copy.deepcopy(g); mutate(changed)
             with self.assertRaises(QuizError): prepare_export(source,changed,{"1":"winner"})
         g.cells[(4,6)]="winner"
-        self.assertEqual(1,len(prepare_export(source,g,{"1":"winner"})[0]))
+        self.assertEqual(0,len(prepare_export(source,g,{"1":"winner"})[0]))
         g.sheet_id=99
         with self.assertRaises(QuizError): prepare_export(source,g,{"1":"winner"})
 
