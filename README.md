@@ -12,6 +12,8 @@
 
 Windows 可直接雙擊專案資料夾內的 `start-classroom.cmd`。
 
+啟動檔會先檢查 Python 是否可用，失敗時自動嘗試 Windows 的 `py` 啟動器。若自行執行 `python app.py` 出現 `failed to locate pyvenv.cfg`，可改用 `py -3 app.py`。
+
 也可以開啟終端機執行，資料夾路徑請依實際位置調整：
 
 ```powershell
