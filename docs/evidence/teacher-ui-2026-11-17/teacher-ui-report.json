@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "timestampUtc": "2026-11-17T02:43:29.699889+00:00",
+  "sourceSwitch": true,
+  "countAndCustomNumbers": true,
+  "stageNavigation": true,
+  "bulkSave": true,
+  "saveAndStart": true,
+  "invalidSettingLocated": true,
+  "failedSaveBlocksStart": true,
+  "filterRetained": true,
+  "manualGradeAndTools": true,
+  "mobileWidth": 390,
+  "screenshots": 11,
+  "pageErrors": []
+}

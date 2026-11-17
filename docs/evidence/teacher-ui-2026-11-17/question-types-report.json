@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "timestampUtc": "2026-11-17T02:43:29.837518+00:00",
+  "combinations": [
+    "choice + stake",
+    "choice + no bet",
+    "short + stake",
+    "short + no bet"
+  ],
+  "ownScoreDuringActivity": true,
+  "manualRegrade": true,
+  "choiceAndZeroDraftRestored": true,
+  "answerKeyHidden": true,
+  "pageErrors": []
+}
