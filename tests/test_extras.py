@@ -185,7 +185,7 @@ class ExtraTests(unittest.TestCase):
         self.assertEqual(before[2]['group_name'],winners[0]['winner']['group_name'])
         self.assertEqual(winners[0]['winner']['group_name'],winners[1]['winner']['group_name'])
         source,written=self.s.export_context(self.t,aid)
-        self.assertEqual(before[3]['text'],written['1.2'])
+        self.assertEqual(f"{before[3]['text']}（{before[3]['group_name']}）",written['1.2'])
 
     def test_e10_scores_ties_negative_and_regrade(self):
         self.s.join(self.a['code'],'C')

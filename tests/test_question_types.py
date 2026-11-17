@@ -102,8 +102,8 @@ class QuestionTypeTests(unittest.TestCase):
         auser=self.s.join(a['code'],'A')['token']; buser=self.s.join(a['code'],'B')['token']
         self.s.transition(self.t,aid,'active'); self.s.submit(auser,aid,'1','錯誤',3); self.s.submit(buser,aid,'1','=1+1',2)
         self.s.transition(self.t,aid,'results'); flow.export(self.t,aid)
-        self.assertEqual('=1+1',from_google(google.data)[0].value(4,6))
-        self.assertEqual({'stringValue':'=1+1'},google.writes[0][1]['requests'][0]['updateCells']['rows'][0]['values'][0]['userEnteredValue'])
+        self.assertEqual('=1+1（B）',from_google(google.data)[0].value(4,6))
+        self.assertEqual({'stringValue':'=1+1（B）'},google.writes[0][1]['requests'][0]['updateCells']['rows'][0]['values'][0]['userEnteredValue'])
 
     def test_thirty_groups_choice_scores_and_unique_correct_winner(self):
         self.s.question_settings(self.t,self.aid,'1',True,[choice()])

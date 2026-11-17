@@ -169,7 +169,7 @@ class Acceptance:
             answers={q:('=1+1' if i==0 else f'雲端驗收－{title}－{q}') for q in unit['questions']}
             self.http(prefix+'/bundle', {'unit':unit['id'],'answers':answers,'stake':3}, students[i%2])
             self.http(prefix+'/bundle', {'unit':unit['id'],'answers':{q:'較晚答案' for q in unit['questions']}}, students[(i+1)%2])
-            expected.update(answers)
+            expected.update({q:f'{answer}（驗收組{i%2+1}）' for q,answer in answers.items()})
         self.http(prefix + "/end", {})
         teacher = self.http(prefix)
         for student in students:
@@ -252,6 +252,8 @@ class Acceptance:
         self.http(prefix+'/bundle', {'unit':unit['id'],'answers':second,'stake':2}, users[1])
         check(normalized(before)==normalized(self.snapshot()),'Open round wrote answers early')
         self.http(prefix+'/round', {'action':'close'})
+        first={q:value+'（最快組）' for q,value in first.items()}
+        second={q:value+'（第二組）' for q,value in second.items()}
         state=wait_for(first)
         ids=[next(a['id'] for a in state['answers'] if a['group_name']==name and a['question_id']==unit['questions'][0]) for name in ['最快組','第二組']]
         for answer_id,verdict,expected in [(ids[0],'incorrect',second),(ids[1],'incorrect',expected_original),(ids[0],'correct',first)]:
@@ -262,7 +264,7 @@ class Acceptance:
         teacher_answer='=老師正確答案－'+q
         previous=state['source']['exported_at']
         self.http(prefix+'/reference', {'question':q,'answer':teacher_answer,'override':True})
-        state=wait_for({**first,q:teacher_answer},previous)
+        state=wait_for({**first,q:teacher_answer+'（老師答案）'},previous)
         previous=state['source']['exported_at']
         self.http(prefix+'/reference', {'question':q,'answer':teacher_answer,'override':False})
         state=wait_for(first,previous)
@@ -271,7 +273,7 @@ class Acceptance:
         state=wait_for(expected_original,previous)
         previous=state['source']['exported_at']
         self.http(prefix+'/reference', {'question':q,'answer':teacher_answer,'override':True})
-        state=wait_for({**expected_original,q:teacher_answer},previous)
+        state=wait_for({**expected_original,q:teacher_answer+'（老師答案）'},previous)
         previous=state['source']['exported_at']
         self.http(prefix+'/reference', {'question':q,'answer':'','override':False})
         state=wait_for(expected_original,previous)

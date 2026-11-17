@@ -25,18 +25,18 @@ class TeacherReferenceTests(unittest.TestCase):
         self.close_first()
         before = self.s.snapshot(self.u,self.aid)['own_score']
         self.s.reference(self.t,self.aid,'1','=teacher',True); self.auto.run_once()
-        self.assertEqual('=teacher',self.value())
+        self.assertEqual('=teacher（老師答案）',self.value())
         self.assertEqual(before,self.s.snapshot(self.u,self.aid)['own_score'])
-        self.assertNotIn('references',self.s.snapshot(self.u,self.aid))
+        self.assertEqual({'1':'=teacher'},self.s.snapshot(self.u,self.aid)['references'])
         self.assertNotIn('reference_overrides',self.s.snapshot(self.u,self.aid))
         self.s.review(self.t,self.aid,self.ids[0],'incorrect'); self.auto.run_once()
-        self.assertEqual('=teacher',self.value())
+        self.assertEqual('=teacher（老師答案）',self.value())
         self.assertFalse(self.s.snapshot(self.t,self.aid)['source']['export_stale'])
         self.s.reference(self.t,self.aid,'1','=teacher',False); self.auto.run_once()
-        self.assertEqual('second',self.value())
+        self.assertEqual('second（B）',self.value())
         self.s.review(self.t,self.aid,self.ids[1],'incorrect'); self.auto.run_once()
         self.s.reference(self.t,self.aid,'1','everyone wrong',True); self.auto.run_once()
-        self.assertEqual('everyone wrong',self.value())
+        self.assertEqual('everyone wrong（老師答案）',self.value())
         self.s.reference(self.t,self.aid,'1','everyone wrong',False); self.auto.run_once()
         self.assertEqual('',self.value())
         self.s.transition(self.t,self.aid,'results')
@@ -49,9 +49,9 @@ class TeacherReferenceTests(unittest.TestCase):
                                       (self.t,'1',' ',True),(self.t,'1','x','true'),(self.t,'1','x'*2001,False)]:
             with self.assertRaises(QuizError): self.s.reference(token,self.aid,q,answer,override)
         self.s.reference(self.t,self.aid,'1','reference only')
-        self.auto.run_once(); self.assertEqual('=first',self.value())
+        self.auto.run_once(); self.assertEqual('=first（A）',self.value())
         self.s.reference(self.t,self.aid,'1',''); self.auto.run_once()
-        self.assertEqual('=first',self.value())
+        self.assertEqual('=first（A）',self.value())
         a=self.s.create(self.t,'manual',['1'])
         self.s.transition(self.t,a['id'],'active'); self.s.transition(self.t,a['id'],'results')
         self.s.reference(self.t,a['id'],'1','manual reference')
@@ -65,7 +65,7 @@ class TeacherReferenceTests(unittest.TestCase):
             clock.return_value=1004
             self.s.reference(self.t,self.aid,'1','no submissions',True)
             self.auto.run_once()
-        self.assertEqual('no submissions',self.value())
+        self.assertEqual('no submissions（老師答案）',self.value())
 
     def test_grouped_child_override_and_cancel(self):
         grid=from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]
@@ -78,9 +78,9 @@ class TeacherReferenceTests(unittest.TestCase):
         self.s.round_action(self.t,aid,'close')
         self.s.reference(self.t,aid,'1.1','teacher child',True);self.auto.run_once()
         targets=[t for t in source['targets'] if t['unit']=='1']
-        self.assertEqual(['teacher child','b'],[self.value(t['row'],t['col']) for t in targets])
+        self.assertEqual(['teacher child（老師答案）','b（group）'],[self.value(t['row'],t['col']) for t in targets])
         self.s.reference(self.t,aid,'1.1','teacher child',False);self.auto.run_once()
-        self.assertEqual(['a','b'],[self.value(t['row'],t['col']) for t in targets])
+        self.assertEqual(['a（group）','b（group）'],[self.value(t['row'],t['col']) for t in targets])
 
     def test_override_during_write_converges_and_external_edit_protected(self):
         self.close_first()
@@ -97,7 +97,7 @@ class TeacherReferenceTests(unittest.TestCase):
             self.assertTrue(entered.wait(2))
             self.s.reference(self.t,self.aid,'1','latest teacher',True)
         finally: release.set();worker.join(4)
-        self.auto.run_once();self.assertEqual('latest teacher',self.value())
+        self.auto.run_once();self.assertEqual('latest teacher（老師答案）',self.value())
         self.g.data['sheets'][0]['data'][0]['rowData'][4]['values'][6]['userEnteredValue']={'stringValue':'external'}
         self.s.reference(self.t,self.aid,'1','latest teacher',False);self.auto.run_once()
         self.assertEqual('error',self.state());self.assertEqual('external',self.value())
@@ -118,7 +118,7 @@ class TeacherReferenceTests(unittest.TestCase):
             s=QuizService(path,'test')
             try:
                 self.assertTrue(s.snapshot(t,aid)['reference_overrides']['1'])
-                self.assertEqual('persisted',s.export_context(t,aid)[1]['1'])
+                self.assertEqual('persisted（老師答案）',s.export_context(t,aid)[1]['1'])
             finally:s.close()
 
     def test_http_reference_option(self):
@@ -134,5 +134,5 @@ class TeacherReferenceTests(unittest.TestCase):
         try:
             self.assertEqual(403,post(self.u,True));self.assertEqual(400,post(self.t,1))
             self.assertEqual(200,post(self.t,True))
-            self.assertEqual('HTTP teacher',self.s.export_context(self.t,self.aid)[1]['1'])
+            self.assertEqual('HTTP teacher（老師答案）',self.s.export_context(self.t,self.aid)[1]['1'])
         finally:server.shutdown();worker.join();server.server_close()

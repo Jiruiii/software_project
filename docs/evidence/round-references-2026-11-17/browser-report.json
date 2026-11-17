@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "timestampUtc": "2026-11-17T13:32:11.731881+00:00",
+  "checks": [
+    "closed-only",
+    "reference-override",
+    "cancel-restores-winner",
+    "polling-draft",
+    "switch-draft",
+    "reload-persistence",
+    "no-answers",
+    "student-report-score",
+    "all-mode",
+    "mobile-layout",
+    "student-immediate-reference",
+    "student-update-clear",
+    "student-reference-reload",
+    "student-previous-round",
+    "student-safe-text",
+    "student-mobile-layout"
+  ],
+  "pageErrors": [],
+  "verifiedWriteSequence": [
+    "學生答案（測試組）",
+    "老師正解（老師答案）",
+    "學生答案（測試組）",
+    "無人作答的正解（老師答案）"
+  ],
+  "googleMode": "in-memory REST fixture; no live Google write"
+}

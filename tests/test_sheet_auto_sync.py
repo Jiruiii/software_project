@@ -44,7 +44,7 @@ class AutoSyncTests(unittest.TestCase):
 
     def test_close_regrade_restore_and_no_redundant_requests(self):
         self.close_first()
-        self.assertEqual('=first', self.value())
+        self.assertEqual('=first（A）', self.value())
         self.assertEqual('active', self.s.snapshot(self.t, self.aid)['phase'])
         self.assertEqual('synced', self.state())
         self.assertEqual(1, len(self.g.writes[0][1]['requests']))
@@ -58,11 +58,11 @@ class AutoSyncTests(unittest.TestCase):
         self.assertEqual([], calls)
         self.assertFalse(self.s.snapshot(self.t,self.aid)['source']['export_stale'])
         self.s.review(self.t, self.aid, self.ids[0], 'incorrect'); self.auto.run_once()
-        self.assertEqual('second', self.value())
+        self.assertEqual('second（B）', self.value())
         self.s.review(self.t, self.aid, self.ids[1], 'incorrect'); self.auto.run_once()
         self.assertEqual('', self.value())
         self.s.review(self.t, self.aid, self.ids[0], 'correct'); self.auto.run_once()
-        self.assertEqual('=first', self.value())
+        self.assertEqual('=first（A）', self.value())
         self.s.round_action(self.t, self.aid, 'next')
         self.s.submit(self.u, self.aid, '2', 'unpublished')
         calls.clear(); self.auto.run_once()
@@ -75,7 +75,7 @@ class AutoSyncTests(unittest.TestCase):
         batch = self.s.review_batch(self.t, self.aid, '1', selections, 'incorrect')
         self.auto.run_once(); self.assertEqual('', self.value())
         self.s.undo_review_batch(self.t, self.aid, batch['batch_id'])
-        self.auto.run_once(); self.assertEqual('=first', self.value())
+        self.auto.run_once(); self.assertEqual('=first（A）', self.value())
         self.assertEqual('pending', self.s.snapshot(self.t, self.aid)['answers'][0]['verdict'])
 
     def test_quick_regrade_reversal_confirms_same_candidate(self):
@@ -92,11 +92,11 @@ class AutoSyncTests(unittest.TestCase):
         self.close_first()
         self.g.fail = True
         self.s.review(self.t, self.aid, self.ids[0], 'incorrect'); self.auto.run_once()
-        self.assertEqual('error', self.state()); self.assertEqual('=first', self.value())
+        self.assertEqual('error', self.state()); self.assertEqual('=first（A）', self.value())
         self.g.fail = False
-        self.auto.run_once(); self.assertEqual('=first', self.value())
+        self.auto.run_once(); self.assertEqual('=first（A）', self.value())
         self.auto.watch(self.t, self.aid, retry=True); self.auto.run_once()
-        self.assertEqual('second', self.value())
+        self.assertEqual('second（B）', self.value())
         self.g.data['sheets'][0]['data'][0]['rowData'][4]['values'][6]['userEnteredValue'] = {'stringValue':'manual edit'}
         self.s.review(self.t, self.aid, self.ids[0], 'correct'); self.auto.run_once()
         self.assertEqual('error', self.state()); self.assertEqual('manual edit', self.value())
@@ -107,9 +107,9 @@ class AutoSyncTests(unittest.TestCase):
         allowed = set()
         self.g.status = lambda key: {'configured':True, 'connected':key in allowed}
         self.s.review(self.t, self.aid, self.ids[0], 'incorrect'); self.auto.run_once()
-        self.assertEqual('needs_auth', self.state()); self.assertEqual('=first', self.value())
+        self.assertEqual('needs_auth', self.state()); self.assertEqual('=first（A）', self.value())
         allowed.add(owner); self.auto.watch(self.t, self.aid); self.auto.run_once()
-        self.assertEqual('second', self.value())
+        self.assertEqual('second（B）', self.value())
         other = self.s.login('test')['token']; self.auto.watch(other, self.aid)
         self.assertEqual(owner, self.auto.bindings[self.aid]['owner'])
         with self.assertRaises(QuizError): self.auto.watch(self.u, self.aid, retry=True)
@@ -139,7 +139,7 @@ class AutoSyncTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertEqual('queued', self.state())
         self.auto.run_once()
-        self.assertEqual('=first', self.value()); self.assertEqual('synced', self.state())
+        self.assertEqual('=first（A）', self.value()); self.assertEqual('synced', self.state())
 
     def test_timer_and_all_mode_without_teacher_polling(self):
         self.s.configure(self.t, self.aid, 'sequential', duration_seconds=3)
@@ -147,15 +147,15 @@ class AutoSyncTests(unittest.TestCase):
             self.s.transition(self.t, self.aid, 'active')
             self.s.submit(self.u, self.aid, '1', 'timer')
             clock.return_value = 1003; self.s.tick(); self.auto.run_once()
-        self.assertEqual('timer', self.value())
+        self.assertEqual('timer（A）', self.value())
         second = self.flow.import_activity(self.t, self.flow.preview(self.t, COPY_URL)['preview_id'], 'all mode')
         user = self.s.join(second['code'], 'C')['token']
         self.auto.watch(self.t, second['id'])
         self.s.transition(self.t, second['id'], 'active')
         self.s.submit(user, second['id'], '1', 'all mode')
-        self.auto.run_once(); self.assertEqual('timer', self.value())
+        self.auto.run_once(); self.assertEqual('timer（A）', self.value())
         self.s.transition(self.t, second['id'], 'results'); self.auto.run_once()
-        self.assertEqual('all mode', self.value())
+        self.assertEqual('all mode（C）', self.value())
 
     def test_grouped_round_uses_same_fallback_group(self):
         grid = from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]
@@ -171,13 +171,13 @@ class AutoSyncTests(unittest.TestCase):
         answer = self.s.snapshot(self.t, aid)['answers'][0]
         self.s.review(self.t, aid, answer['id'], 'incorrect'); self.auto.run_once()
         targets = [t for t in source['targets'] if t['unit']=='1']
-        self.assertEqual(['b1','b2'], [self.value(t['row'],t['col']) for t in targets])
+        self.assertEqual(['b1（second）','b2（second）'], [self.value(t['row'],t['col']) for t in targets])
 
     def test_official_and_structure_changes_remain_protected(self):
         self.close_first()
         self.g.data['sheets'][0]['data'][0]['rowData'][4]['values'][2]['userEnteredValue'] = {'stringValue':'changed question'}
         self.s.review(self.t, self.aid, self.ids[0], 'incorrect'); self.auto.run_once()
-        self.assertEqual('error', self.state()); self.assertEqual('=first', self.value())
+        self.assertEqual('error', self.state()); self.assertEqual('=first（A）', self.value())
         self.g.data = FakeGoogle().data
         preview = self.flow.preview(self.t, 'https://docs.google.com/spreadsheets/d/'+SINGLE_TEMPLATE+'/edit')
         a = self.flow.import_activity(self.t, preview['preview_id'], 'protected')

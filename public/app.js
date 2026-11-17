@@ -209,7 +209,9 @@ function renderCards(state) {
       input.id=`answer-${state.questions.indexOf(q)}`; label.htmlFor=input.id; input.maxLength=2000; input.required=true;
       input.placeholder='和組員討論後，在這裡寫下答案…'; inputs[q]=input;
       const saved=el('p',undefined,'saved-answer'), time=el('p',undefined,'answer-time'); saved.hidden=time.hidden=true;
-      field.append(label,input,saved,time); card.append(field);
+      const reference=el('aside',undefined,'published-reference'); reference.hidden=true;
+      reference.append(el('strong','老師正確答案'),el('p',undefined,'reference-text'));
+      field.append(label,input,saved,time,reference); card.append(field);
     }
     const betting=state.question_settings[unit.questions[0]].betting_enabled;
     const label=el('label',betting?'信心下注（可不押，題組只計一次分）':'本題未開放下注'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
@@ -254,6 +256,8 @@ function updateInputs() {
       const answer=answers.get(field.dataset.question), input=field.querySelector('.answer-input'); input.disabled=disabled; input.hidden=!!answer;
       const saved=field.querySelector('.saved-answer'), time=field.querySelector('.answer-time'); saved.hidden=time.hidden=!answer;
       if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · ${answerElapsedText(answer)} · ${verdictNames[answer.verdict]} · ${answer.stake===0?'不押':`下注 ${answer.stake} 分`}`;}
+      const reference=field.querySelector('.published-reference'), text=current.references?.[field.dataset.question] || '';
+      reference.hidden=!text; reference.querySelector('.reference-text').textContent=text;
     }
   }
 }

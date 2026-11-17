@@ -23,6 +23,7 @@ class FakeGoogle:
 
     def read(self, owner, sid): return from_google(copy.deepcopy(self.data))
     def status(self, owner): return {'configured':True, 'connected':True}
+    def disconnect(self, owner): return {'ok':True}
 
     def request(self, owner, sid, body=None):
         if body is None: return copy.deepcopy(self.data)
@@ -68,7 +69,7 @@ class SheetsWorkflowTests(unittest.TestCase):
         self.assertEqual('', from_google(self.google.data)[0].value(4,6))
         self.service.review(self.teacher, aid, answer['id'], 'correct')
         self.flow.export(self.teacher, aid)
-        self.assertEqual('=SUM(A1:A2)', from_google(self.google.data)[0].value(4,6))
+        self.assertEqual('=SUM(A1:A2)（A）', from_google(self.google.data)[0].value(4,6))
 
     def test_grouped_import_writeback_and_reimport(self):
         grid=from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]
@@ -79,7 +80,7 @@ class SheetsWorkflowTests(unittest.TestCase):
         self.service.transition(self.teacher,aid,'results')
         self.assertEqual(2,self.flow.export(self.teacher,aid)['written'])
         after=from_google(self.google.data)[0]
-        self.assertEqual('first',after.value(4,6)); self.assertEqual('second',after.value(5,6))
+        self.assertEqual('first（group）',after.value(4,6)); self.assertEqual('second（group）',after.value(5,6))
         imported=self.imported()
         self.assertEqual(['1.1','1.2'],self.service.snapshot(self.teacher,imported['id'])['units'][0]['questions'])
 
@@ -130,7 +131,7 @@ class SheetsWorkflowTests(unittest.TestCase):
         a,_=self.ended(); before=copy.deepcopy(self.google.data)
         self.assertEqual(1,self.flow.export(self.teacher,a["id"])["written"])
         self.assertEqual(COPY_ID,self.google.writes[0][0])
-        before["sheets"][0]["data"][0]["rowData"][4]["values"][6]["userEnteredValue"]={"stringValue":"=SUM(A1:A2)"}
+        before["sheets"][0]["data"][0]["rowData"][4]["values"][6]["userEnteredValue"]={"stringValue":"=SUM(A1:A2)（A）"}
         self.assertEqual(before,self.google.data)
         self.assertTrue(self.service.snapshot(self.teacher,a["id"])["source"]["exported_at"])
         self.assertEqual(1,self.flow.export(self.teacher,a["id"])["written"])
@@ -166,7 +167,7 @@ class SheetsWorkflowTests(unittest.TestCase):
         self.assertEqual(1,self.flow.export(self.teacher,a["id"])["written"])
         update=self.google.writes[0][1]["requests"][0]["updateCells"]
         self.assertEqual({"sheetId":42,"rowIndex":12,"columnIndex":9},update["start"])
-        self.assertEqual("=SUM(A1:A2)",from_google(self.google.data)[0].cells[(12,9)])
+        self.assertEqual("=SUM(A1:A2)（A）",from_google(self.google.data)[0].cells[(12,9)])
 
     def test_read_permission_failure_creates_no_activity(self):
         def denied(*args): raise QuizError(403,"來源無讀取權限")

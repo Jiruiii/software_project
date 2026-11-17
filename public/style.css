@@ -27,3 +27,5 @@ select{color:var(--ink);background:#fdfefa}summary{cursor:pointer;outline-offset
 .sheet-sync-panel{margin:18px 0;padding:18px 22px;background:#fff;border:1px solid var(--line);border-radius:14px}.sheet-sync-panel .sidebar-note{margin:0}.sheet-sync-panel .text-button{display:inline-block;margin-right:16px}#sheet-sync-status{line-height:1.6;overflow-wrap:anywhere}#sheet-sync-status[data-state="error"],#sheet-sync-status[data-state="needs_auth"]{color:var(--red)}
 
 .teacher-reference{margin:18px 0}.teacher-reference>summary{cursor:pointer;color:var(--green);font-weight:700;line-height:1.6}.teacher-reference textarea{width:100%;box-sizing:border-box;resize:vertical}.teacher-reference .form-actions{align-items:center;flex-wrap:wrap;gap:12px}
+
+.published-reference{margin:16px 0 8px;padding:14px 16px;border-left:4px solid var(--green);border-radius:8px;background:#edf4e9;color:var(--ink)}.published-reference strong{font-size:13px;color:var(--green)}.published-reference .reference-text{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}

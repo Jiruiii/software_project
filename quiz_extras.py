@@ -317,10 +317,10 @@ class ExtraFeatures:
 
     def _sheet_answers(self, activity):
         aid = activity['id']
-        answers = {q:a['text'] for q,a in self._winner_rows(aid).items() if self._reviewable(activity,q)}
+        answers = {q:f"{a['text']}（{a['group_name']}）" for q,a in self._winner_rows(aid).items() if self._reviewable(activity,q)}
         for row in self.db.execute('SELECT question_id,reference_answer FROM question_meta WHERE activity_id=? AND reference_override=1', (aid,)):
             if row['reference_answer'] and self._reviewable(activity,row['question_id']):
-                answers[row['question_id']] = row['reference_answer']
+                answers[row['question_id']] = f"{row['reference_answer']}（老師答案）"
         return answers
 
     @expire_first
@@ -496,8 +496,9 @@ class ExtraFeatures:
         if session["role"] == "teacher":
             state["reviewable_questions"] = [q for q in state["questions"] if self._reviewable(state, q)]
             state['reference_overrides'] = {r['question_id']:bool(r['reference_override']) for r in self.db.execute('SELECT question_id,reference_override FROM question_meta WHERE activity_id=?', (state['id'],))}
-        if session['role'] == 'teacher' or state['phase'] == 'results':
-            state["references"] = {r["question_id"]:r["reference_answer"] for r in self.db.execute("SELECT question_id,reference_answer FROM question_meta WHERE activity_id=?", (state["id"],))}
+        state["references"] = {r["question_id"]:r["reference_answer"]
+                               for r in self.db.execute("SELECT question_id,reference_answer FROM question_meta WHERE activity_id=?", (state["id"],))
+                               if session['role'] == 'teacher' or self._reviewable(state,r['question_id'])}
         if state["phase"] == "results":
             state["scoreboard"] = self._scoreboard(state['id'])
             if session["role"] == "student": state["report"] = self._report(state)

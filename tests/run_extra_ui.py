@@ -75,13 +75,13 @@ def main():
         if suite == 'auto-sync':
             written = [r['updateCells']['rows'][0]['values'][0]['userEnteredValue']['stringValue']
                        for _, body in connection.writes for r in body['requests']]
-            if written != ['最快答案', '第二快答案', '', '最快答案', '正解']:
+            if written != ['最快答案（最快組）', '第二快答案（第二組）', '', '最快答案（最快組）', '正解（第二組）']:
                 raise AssertionError('Unexpected sheet write sequence: '+repr(written))
             report['verifiedWriteSequence'] = written
             report['googleMode'] = 'in-memory REST fixture; no live Google write'
         if suite == 'teacher-reference':
             written = [r['updateCells']['rows'][0]['values'][0]['userEnteredValue']['stringValue'] for _, body in connection.writes for r in body['requests']]
-            if written != ['學生答案','老師正解','學生答案','無人作答的正解']:
+            if written != ['學生答案（測試組）','老師正解（老師答案）','學生答案（測試組）','無人作答的正解（老師答案）']:
                 raise AssertionError('Unexpected teacher reference writes: '+repr(written))
             report['verifiedWriteSequence'] = written
             report['googleMode'] = 'in-memory REST fixture; no live Google write'
