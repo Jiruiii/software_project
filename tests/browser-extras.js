@@ -12,7 +12,7 @@ async (page) => {
   stage='line 8';
   await page.locator('#activity-title').fill('額外功能驗收');
   stage='line 9';
-  await page.locator('#question-numbers').fill('1\n2');
+  await page.locator('#question-count').fill('2');
   stage='line 10';
   await page.locator('#create-form button').click();
   stage='line 11';
@@ -22,7 +22,7 @@ async (page) => {
   stage='line 13';
   await page.locator('#quiz-fairness').check();
   stage='line 14';
-  await page.locator('#settings-form button').click();
+  await page.locator('#settings-form button[type="submit"]').click();
   stage='line 15';
   await page.locator('#notice').filter({hasText:'活動規則已儲存'}).waitFor();
   stage='line 16';
@@ -91,6 +91,7 @@ async (page) => {
   check(await student.locator('#replay').isHidden(),'student replay exposed');
   stage='line 49';
   const before = await page.evaluate(()=>JSON.stringify(current.answers));
+  await page.locator('#teacher-tabs [data-view="tools"]').click(); await page.locator('#tool-replay > summary').click();
   stage='line 50';
   await page.locator('#replay-play').click(); await page.locator('#replay-play').click();
   stage='line 51';
@@ -111,6 +112,7 @@ async (page) => {
   await page.waitForFunction(()=>document.querySelector('#replay-status').textContent.includes('無成功組別'));
   stage='line 59';
   check(before===await page.evaluate(()=>JSON.stringify(current.answers)),'replay changed records');
+  await page.locator('#teacher-tabs [data-view="monitor"]').click(); await page.locator('#monitor-question').selectOption('');
   stage='line 60';
   await page.getByRole('button',{name:'驗收A組 第 1 題判為錯誤',exact:true}).click();
   stage='line 61';
@@ -120,13 +122,13 @@ async (page) => {
   stage='line 63';
   await student.waitForFunction(()=>document.querySelector('#results').textContent.includes('搶答成功（正確）'));
   stage='line 64';
-  await page.locator('#cluster-refresh').click();
+  await page.locator('#teacher-tabs [data-view="tools"]').click(); await page.locator('#tool-classification > summary').click(); await page.locator('#cluster-refresh').click();
   stage='line 65';
   await page.waitForFunction(()=>document.querySelector('#cluster-list').textContent.includes('驗收A組：測試答案'));
   stage='line 66';
   check(await student.locator('#classification').isHidden(),'student clusters exposed');
   stage='line 67';
-  await page.locator('#reference-0').fill('老師提供的參考答案');
+  await page.locator('#tool-references > summary').click(); await page.locator('#reference-0').fill('老師提供的參考答案');
   stage='line 68';
   await page.locator('#reference-forms form').first().locator('button').click();
   stage='line 69';
@@ -179,6 +181,7 @@ async (page) => {
   await page.waitForFunction(()=>current.answers.length===2);
   stage='line 93';
   await page.locator('#end').click(); await student.locator('#group-report').waitFor({state:'visible'});
+  await page.locator('#teacher-tabs [data-view="monitor"]').click();
   stage='line 94';
   await page.getByRole('button',{name:'題組學生 第 1.1 題判為正確',exact:true}).click();
   stage='line 95';
@@ -193,9 +196,9 @@ async (page) => {
   await student.screenshot({path:'output/playwright/extras-grouped-student.png',fullPage:true});
   stage='line 99';
   await page.locator('#back').click(); await page.locator('#activity-title').fill('倒數驗收');
-  await page.locator('#question-numbers').fill('1'); await page.locator('#create-form button').click();
+  await page.locator('#question-count').fill('1'); await page.locator('#create-form button').click();
   await page.locator('#session-title').filter({hasText:'倒數驗收'}).waitFor({state:'visible'});
-  await page.locator('#quiz-duration').fill('2'); await page.locator('#settings-form button').click();
+  await page.locator('#quiz-duration').fill('2'); await page.locator('#settings-form button[type="submit"]').click();
   await page.locator('#notice').filter({hasText:'活動規則已儲存'}).waitFor();
   await page.locator('#start').click(); await page.locator('#countdown').waitFor({state:'visible'});
   await page.locator('#results').waitFor({state:'visible'});

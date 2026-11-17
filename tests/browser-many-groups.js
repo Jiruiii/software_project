@@ -10,7 +10,7 @@ async (page) => {
   await page.locator('#teacher-password').fill('many-groups-test-only');
   await page.locator('#login-form button').click();
   await page.locator('#activity-title').fill('30 組同時搶答・自動驗收');
-  await page.locator('#question-numbers').fill('1\n2\n3\n4\n5\n6');
+  await page.locator('#question-count').fill('6');
   await page.locator('#create-form button').click();
   await page.locator('#activity').waitFor({state:'visible'});
   const code = await page.locator('#session-code').innerText();

@@ -42,21 +42,23 @@
       </div>
     </section>
     <section id="dashboard" hidden>
-      <div class="section-heading"><div><span class="eyebrow">TEACHER SPACE</span><h1>今天，想一起討論什麼？</h1><p class="muted">建立一場活動，或接續你的課堂紀錄。</p></div><span class="badge">教師</span></div>
+      <div class="section-heading"><div><span class="eyebrow">教師工作台</span><h1>開始一場課堂搶答</h1><p class="muted">建立活動 → 設定題目 → 開放作答</p></div><span class="badge">教師</span></div>
       <div class="dashboard-grid">
-        <form id="create-form" class="panel">
-          <div class="panel-heading"><h2>建立活動</h2><span class="step-number">01</span></div>
+        <div id="create-panel" class="panel">
+          <div class="panel-heading"><h2>建立新活動</h2></div>
+          <div class="source-switch" role="group" aria-label="建立方式"><button id="source-manual" type="button" aria-pressed="true">直接建立</button><button id="source-sheets" type="button" aria-pressed="false">匯入 Google 學習單</button></div>
+        <form id="create-form">
           <label for="activity-title">活動名稱</label><input id="activity-title" maxlength="100" placeholder="例如 第三週・課堂討論" required>
-          <label for="question-numbers">題號 <span class="muted">每行一題</span></label><textarea id="question-numbers" rows="5" placeholder="1&#10;2&#10;3" required></textarea>
-          <p class="field-hint">輸入 1～100 個不重複題號。學生依課堂學習單作答。</p>
-          <button class="primary wide" type="submit">建立並進入活動 <span aria-hidden="true">→</span></button>
-          <p class="integration-note">有 Guided Notes 學習單？請使用下方 Google Sheets 匯入，才能寫回原表。</p>
+          <label for="question-count">幾題？</label><input id="question-count" type="number" min="1" max="100" step="1" value="5" required>
+          <p class="field-hint">自動編號 1、2、3…；學生依你的投影片或學習單作答。</p>
+          <details id="custom-questions"><summary>使用自訂題號</summary><label for="question-numbers">題號，每行一題</label><textarea id="question-numbers" rows="3" placeholder="A&#10;B&#10;C" disabled></textarea><p class="field-hint">最多 100 題，題號不能重複。</p></details>
+          <button class="primary wide" type="submit">下一步：設定活動 →</button>
         </form>
+        </div>
         <div class="panel"><div class="panel-heading"><h2>我的課堂活動</h2><span id="activity-count" class="count">0</span></div><div id="activity-list"></div></div>
       </div>
-      <section class="panel sheets-panel">
-        <div class="panel-heading"><h2>從 Google Sheets 建立活動</h2><span class="badge">Guided Notes</span></div>
-        <p class="muted">貼上自己的學習單連結，先核對題號與答案格，再建立活動。公開表不需登入即可讀取；私人表與寫回需先連線 Google。</p>
+      <section id="sheets-create" class="sheets-panel" hidden>
+        <p class="muted">匯入學習單題號，活動結束後可將成功答案寫回原表。</p>
         <div class="google-controls"><span id="google-status" class="muted">檢查 Google 設定中…</span><button id="google-connect" class="text-button">連線 Google</button><button id="google-disconnect" class="text-button" hidden>中斷 Google 連線</button><a href="/google-setup.html" target="_blank" rel="noopener" class="text-button">首次設定說明 ↗</a></div>
         <a id="google-auth-link" class="primary" target="_blank" rel="noopener" hidden>開啟 Google 授權頁 ↗</a>
         <form id="sheet-preview-form">
@@ -78,23 +80,27 @@
         <aside class="session-sidebar">
           <div class="code-block"><span>活動代碼</span><strong id="session-code"></strong><p>讓同學在另一個分頁輸入此代碼。</p></div>
           <ol class="phase-steps" aria-label="活動階段"><li data-phase="preparing"><span>01</span><div>準備中<small>加入小組，準備作答</small></div></li><li data-phase="active"><span>02</span><div>作答中<small>思考答案，即時送出</small></div></li><li data-phase="results"><span>03</span><div>結果<small>看看每題的搶答成果</small></div></li></ol>
-          <div id="teacher-controls" hidden><button id="start" class="primary wide">開始搶答 →</button><button id="end" class="danger wide" hidden>結束搶答並公布結果</button></div>
+          <div id="teacher-controls" hidden><button id="save-settings" class="secondary">儲存設定</button><button id="start" class="primary">儲存並開始搶答 →</button><button id="end" class="danger" hidden>結束活動</button></div>
           <div id="round-controls" hidden><button id="close-round" class="danger wide">關閉本題</button><button id="next-round" class="primary wide">開啟下一題 →</button></div>
           <p id="session-rule" class="sidebar-note"></p>
           <div id="sheet-export-controls" hidden><p id="source-name" class="sidebar-note"></p><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟來源學習單 ↗</a><button id="sheet-export" class="primary wide">寫回成功答案 →</button><p class="field-hint">只修改原學習單的答案格。匯出期間請勿移動原表列欄；Google 尚未連線時，先返回活動清單連線。</p></div>
         </aside>
         <div class="session-main">
+          <nav id="teacher-tabs" class="workspace-nav" aria-label="老師工作區" hidden><button data-view="settings">1 活動設定</button><button data-view="questions">2 題目與計分</button><button data-view="monitor">作答與批改</button><button data-view="results">搶答結果</button><button data-view="tools">更多工具</button></nav>
+          <p id="setup-status" class="field-hint" aria-live="polite" hidden></p>
           <div class="live-heading"><h2 id="content-title">準備作答</h2><span id="phase-label" class="phase-pill"></span></div>
           <p id="phase-help" class="muted"></p>
           <p id="round-status" class="integration-note" hidden></p>
           <p id="countdown" class="integration-note" hidden></p>
           <section id="own-score" class="score-card" aria-live="polite" hidden><span>本組目前總分</span><strong id="own-score-total">0 分</strong><p id="own-score-pending"></p><small>只累積本場活動；不押不加不扣，未判定暫不計分。</small></section>
           <form id="settings-form" class="panel" hidden>
-            <h3>活動規則</h3><label for="quiz-mode">開放方式</label>
+            <h3>怎麼進行這場搶答？</h3><label for="quiz-mode">開放方式</label>
             <select id="quiz-mode"><option value="all">全題同時開放</option><option value="sequential">逐題搶答</option></select>
-            <label class="check-label"><input id="quiz-fairness" type="checkbox">啟用保底：連續 3 題未成功，下一題先答 3 秒</label>
-            <label for="quiz-duration">作答秒數（0 不限時；逐題模式為每題秒數，含保底時間）</label><input id="quiz-duration" type="number" min="0" max="3600" step="1" value="0" required>
-            <button class="primary" type="submit">儲存活動規則</button>
+            <p id="mode-help" class="field-hint"></p>
+            <label id="fairness-field" class="check-label" hidden><input id="quiz-fairness" type="checkbox">保底先答：連續 3 題未成功，下題先答 3 秒</label>
+            <label for="quiz-duration">作答時間（秒）</label><input id="quiz-duration" type="number" min="0" max="3600" step="1" value="0" required>
+            <p class="field-hint">填 0 表示不限時。逐題模式會每題重新倒數，含保底先答時間。</p>
+            <div class="form-actions"><button class="secondary" type="submit">儲存活動規則</button><button id="go-questions" class="primary" type="button">下一步：題目與計分 →</button></div>
           </form>
           <section id="question-settings" class="panel" hidden><h3>題型與下注</h3><p class="field-hint">每題可選簡答或單選，並獨立決定是否開放下注。單選自動批改每組，簡答由老師批改；開始後不能修改。題組共用一次下注。</p><div id="question-settings-forms"></div></section>
           <div id="results" hidden></div>
@@ -102,6 +108,7 @@
           <section id="references" class="panel" hidden><h3>老師參考答案</h3><p class="field-hint">儲存後會出現在各組報告；不會自動判分。</p><div id="reference-forms"></div></section>
           <section id="group-report" class="panel" hidden><h3>本組學習報告</h3><p class="field-hint">正確加下注分、錯誤扣下注分、未判定 0 分。題組只計一次，得分列於第一小題。</p><div id="report-table" class="table-scroll"></div><button id="download-report" class="primary">下載本組報告 CSV</button></section>
           <button id="download-csv" class="primary" hidden>下載活動 CSV</button>
+          <section id="result-actions" class="panel" hidden><h3>下載與寫回</h3></section>
           <section id="replay" class="panel" hidden>
             <h3>搶答過程重播</h3><label for="replay-question">選擇題號</label><select id="replay-question"></select>
             <p class="field-hint">依原始收件順序播放，長時間等待會縮短；重播不會修改紀錄。</p>
@@ -109,7 +116,7 @@
             <p id="replay-status" aria-live="polite"></p><ol id="replay-answers"></ol>
           </section>
           <div id="student-questions" class="question-grid" hidden></div>
-          <div id="teacher-monitor" hidden><div id="monitor-summary" class="monitor-summary"></div><div id="monitor-table" class="table-scroll"></div></div>
+          <div id="teacher-monitor" hidden><div class="monitor-toolbar"><div id="monitor-summary" class="monitor-summary"></div><div><label for="monitor-question">查看題目</label><select id="monitor-question"><option value="">全部題目</option></select></div></div><p class="field-hint">關閉題目後可批改；請勿將這個畫面投影給學生。</p><div id="monitor-table" class="table-scroll"></div></div>
           <section id="classification" class="panel" hidden><h3>答案歸類</h3>
             <p class="field-hint">忽略全半形、大小寫與多餘空白；相似度達 85% 歸為一類。文字相近，不代表同義或正確。</p>
             <label for="cluster-question">選擇題號</label><select id="cluster-question"></select><button id="cluster-refresh" class="primary">比較目前答案</button>

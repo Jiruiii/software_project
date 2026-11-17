@@ -6,6 +6,7 @@ let auth = null, activityId = null, current = null, generation = 0;
 let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", lastResults = "", lastList = "";
 const pendingAnswers = new Set();
 let sheetPreview = null, lastGoogleCheck = 0;
+let teacherView = 'settings', teacherViewKey = '', savingSettings = false, monitorKey = '', monitorFollow = true;
 try { auth = JSON.parse(sessionStorage.getItem("classroom.auth")); activityId = sessionStorage.getItem("classroom.activity"); } catch { sessionStorage.clear(); }
 
 function el(tag, text, cls) {
@@ -60,6 +61,7 @@ function saveAuth(value) {
 function selectActivity(id) {
   resetReplay();
   generation++; activityId = id; current = null; cardsKey = lastMonitor = lastResults = "";
+  teacherViewKey = ''; monitorKey = '';
   if (id) sessionStorage.setItem("classroom.activity", id); else sessionStorage.removeItem("classroom.activity");
   showView(); notice(""); refresh();
 }
@@ -91,8 +93,8 @@ $("join-form").onsubmit = (event) => {
 $("create-form").onsubmit = (event) => {
   event.preventDefault(); action(event.submitter, async () => {
     const data = await api("/api/activities", {title: $("activity-title").value,
-      questions: $("question-numbers").value.trim().split(/\r?\n/)});
-    $("create-form").reset(); selectActivity(data.id); await refresh();
+      questions: $('custom-questions').open ? $("question-numbers").value.trim().split(/\r?\n/) : Array.from({length:Number($('question-count').value)},(_,i)=>String(i+1))});
+    $("create-form").reset(); $('custom-questions').open=false; syncQuestionInput(); selectActivity(data.id); await refresh();
   });
 };
 $("logout").onclick = () => action($("logout"), async () => {await api("/api/logout", {}); saveAuth(null);});
@@ -151,7 +153,8 @@ $("sheet-export").onclick = () => action($("sheet-export"), async () => {
   const result = await api(`/api/activities/${activityId}/export`, {}); notice(result.message, true); await refresh();
 });
 for (const kind of ["start", "end"]) $(kind).onclick = () => action($(kind), async () => {
-  if (kind==='start' && document.querySelector('.question-config-form[data-dirty="true"]')) throw new Error('請先儲存尚未儲存的題型與下注設定，再開始搶答。');
+  if (savingSettings) return;
+  if (kind==='start') await saveAllSettings();
   await api(`/api/activities/${activityId}/${kind}`, {}); await refresh();
 });
 
@@ -165,11 +168,13 @@ async function downloadFile(path, filename) {
 $("download-csv").onclick = () => action($("download-csv"), () => downloadFile(`/api/activities/${activityId}/csv`, "課堂搶答結果.csv"));
 $("settings-form").onsubmit = event => {
   event.preventDefault(); action(event.submitter, async () => {
-    await api(`/api/activities/${activityId}/settings`, {mode:$("quiz-mode").value, fairness:$("quiz-fairness").checked, duration_seconds:Number($('quiz-duration').value)});
+    if(savingSettings) return;
+    const payload=activitySettingsPayload();
+    await withSettingsLock(()=>saveActivitySettings(payload));
     notice("活動規則已儲存。", true); await refresh();
   });
 };
-$("quiz-mode").onchange = () => {if ($("quiz-mode").value === "all") $("quiz-fairness").checked = false;};
+$("quiz-mode").onchange = syncModeHelp;
 for (const [id, kind] of [["close-round","close"],["next-round","next"]]) $(id).onclick = () => action($(id), async () => {
   await api(`/api/activities/${activityId}/round`, {action:kind}); await refresh();
 });
@@ -177,7 +182,7 @@ function renderList(items) {
   const key = JSON.stringify(items); if (lastList === key) return; lastList = key;
   $("activity-count").textContent = items.length;
   $("activity-list").replaceChildren();
-  if (!items.length) $("activity-list").append(el("p", "還沒有活動。\n從左側建立你的第一場課堂搶答。", "empty"));
+  if (!items.length) $("activity-list").append(el("p", "還沒有活動。建立第一場搶答後，紀錄會保存在這裡。", "empty"));
   for (const item of items) {
     const button = el("button", undefined, "activity-card");
     const info = el("div"); info.append(el("strong", item.title), el("small", `代碼 ${item.code} · ${new Date(item.created_at * 1000).toLocaleDateString("zh-TW")}`));
@@ -233,7 +238,8 @@ function renderCards(state) {
 }
 function updateInputs() {
   if (!current) return;
-  $('start').disabled=!connected || $('start').classList.contains('busy');
+  $('start').disabled=!connected || savingSettings || $('start').classList.contains('busy');
+  $('save-settings').disabled=!connected || savingSettings || $('save-settings').classList.contains('busy');
   $('end').disabled=!connected || $('end').classList.contains('busy');
   if (current.role!=='student') return;
   const answers=new Map(current.answers.map(a=>[a.question_id,a]));
@@ -252,21 +258,24 @@ function updateInputs() {
   }
 }
 function renderMonitor(state) {
-  const key = JSON.stringify([state.groups, state.answers, state.questions, state.reviewable_questions]);
+  const selected=$('monitor-question').value, questions=selected?[selected]:state.questions;
+  const key = JSON.stringify([state.groups, state.answers, questions, state.reviewable_questions]);
   if (lastMonitor === key) return; lastMonitor = key;
   $("monitor-summary").textContent = `${state.groups.length} 個小組已加入 · ${state.questions.length} 題 · 已收到 ${state.answers.length} 份答案`;
   const wrap = $("monitor-table"); wrap.replaceChildren();
-  if (!state.groups.length) {wrap.append(el("p", "等待同學加入。分享左側活動代碼，開始今天的討論。", "empty")); return;}
+  if (!state.groups.length) {wrap.append(el("p", "還沒有小組加入。將上方活動代碼提供給同學即可加入。", "empty")); return;}
   const table = el("table"), thead = el("thead"), head = el("tr");
-  head.append(el("th", "小組")); for (const q of state.questions) head.append(el("th", `第 ${q} 題`)); thead.append(head);
+  head.append(el("th", "小組")); for (const q of questions) head.append(el("th", `第 ${q} 題`)); thead.append(head);
   const body = el("tbody");
   const lookup = new Map(state.answers.map(a => [JSON.stringify([a.group_id,a.question_id]), a]));
   for (const group of state.groups) {
     const row = el("tr"); row.append(el("th", group.name));
-    for (const q of state.questions) {
+    for (const q of questions) {
       const cell = el("td"), answer = lookup.get(JSON.stringify([group.id,q]));
       if (answer) {
-        cell.append(el("span", answer.text, "cell-answer"), el("small", `${timeText(answer.received_at)} · ${(answer.elapsed_ms / 1000).toFixed(3)} 秒 · 下注 ${answer.stake} · ${verdictNames[answer.verdict]}`));
+        const content=el('span',answer.text,'cell-answer');
+        if(answer.text.length>300) {content.tabIndex=0; content.setAttribute('role','region'); content.setAttribute('aria-label',`${group.name} 第 ${q} 題完整答案，可捲動閱讀`);}
+        cell.append(content, el("small", `${timeText(answer.received_at)} · ${(answer.elapsed_ms / 1000).toFixed(3)} 秒 · ${answer.stake===0?'不押':`下注 ${answer.stake}`} · ${verdictNames[answer.verdict]}`));
         if (state.reviewable_questions.includes(q)) {
           const controls = el("div", undefined, "review-controls");
           for (const verdict of ['correct','incorrect','pending']) {
@@ -293,7 +302,13 @@ function renderResults(state) {
     const row = el("div", undefined, "result-row"), detail = el("div");
     row.append(el("span", `第 ${result.question_id} 題`, "result-number"));
     detail.append(el("div", result.winner ? `${result.winner.group_name} · 搶答成功（${verdictNames[result.winner.verdict]}）` : result.has_answers ? "無成功組別（候選已判錯）" : "無人作答", "winner"));
-    if (result.winner) detail.append(el("p", result.winner.text, "result-answer"));
+    if (result.winner) {
+      const text=result.winner.text;
+      if(text.length>300) {
+        detail.append(el('p',text.slice(0,140)+'…','result-answer'));
+        const full=el('details',undefined,'full-answer'); full.append(el('summary','查看完整答案'),el('p',text,'result-answer')); detail.append(full);
+      } else detail.append(el('p',text,'result-answer'));
+    }
     row.append(detail); list.append(row);
   }
   $("results").replaceChildren(list);
@@ -344,6 +359,7 @@ function renderState(state) {
   renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
+  $('activity').classList.toggle('teacher-view',teacher);
   renderQuestionSettings(state);
   $('own-score').hidden=teacher;
   if (!teacher) {
@@ -365,7 +381,7 @@ function renderState(state) {
   }
   $("session-title").textContent = state.title;
   $("session-code").textContent = state.code;
-  $("session-subtitle").textContent = teacher ? `${state.questions.length} 道題目 · 掌握每一組的思考` : `${state.group_name} · ${state.questions.length} 道題目，一起完成`;
+  $("session-subtitle").textContent = teacher ? `${state.questions.length} 道題目 · ${state.groups.length} 個小組已加入` : `${state.group_name} · ${state.questions.length} 道題目，一起完成`;
   $("role-badge").textContent = teacher ? "教師" : state.group_name;
   $("teacher-controls").hidden = !teacher || ended;
   $("start").hidden = state.phase !== "preparing";
@@ -385,8 +401,10 @@ function renderState(state) {
   $("settings-form").hidden = !teacher || state.phase !== "preparing";
   if ($("settings-form").dataset.activity !== state.id) {
     $("settings-form").dataset.activity = state.id;
+    $('settings-form').dataset.dirty='false';
     $("quiz-mode").value = state.settings.mode; $("quiz-fairness").checked = !!state.settings.fairness;
     $('quiz-duration').value=state.settings.duration_seconds;
+    syncModeHelp();
   }
   const sequential = state.settings.mode === "sequential";
   $('countdown').hidden=state.round.deadline===null || state.phase!=='active';
@@ -394,7 +412,7 @@ function renderState(state) {
   $("round-controls").hidden = !teacher || !sequential || state.phase !== "active";
   $("close-round").hidden = !state.round.round_open;
   $("next-round").hidden = !!state.round.round_open;
-  $("round-status").hidden = !sequential;
+  $("round-status").hidden = !sequential || (teacher && state.phase==='preparing');
   const priorityLeft = Math.max(0, Math.ceil(state.round.priority_until - state.server_time));
   $("round-status").textContent = state.round.unit_id === null ? "逐題模式：老師開始後開放第一題。" :
     `目前第 ${state.round.unit_id} 題 · ${state.round.round_open && !ended ? "作答中" : "已關閉"}` +
@@ -405,8 +423,9 @@ function renderState(state) {
     $("source-link").href = state.source.url;
     $("sheet-export").hidden = !ended;
   }
-  if (teacher) renderMonitor(state); else renderCards(state);
+  if (teacher) {syncMonitorFilter(state); renderMonitor(state);} else renderCards(state);
   if (ended) renderResults(state);
+  renderTeacherWorkspace(state);
   updateInputs();
 }
 async function refresh() {
@@ -478,7 +497,8 @@ function renderQuestionSettings(state) {
   panel.dataset.activity=state.id;
   $('question-settings-forms').replaceChildren(...state.units.map((unit,index)=>{
     const details=el('details',undefined,'question-config-unit'); details.open=index===0; details.dataset.unit=unit.id;
-    const summary=el('summary',`第 ${unit.id} ${unit.questions.length>1?'題組':'題'}：設定題型與下注`);
+    const summary=el('summary'), name=el('span',`第 ${unit.id} ${unit.questions.length>1?'題組':'題'}`), description=el('span',undefined,'question-config-summary'); summary.append(name,description);
+    details.ontoggle=()=>{if(details.open) for(const other of $('question-settings-forms').children) if(other!==details) other.open=false;};
     const form=el('form',undefined,'question-config-form'), fields=el('fieldset'); form.dataset.dirty='false';
     const betLabel=el('label',undefined,'check-label'), betting=el('input'); betting.type='checkbox'; betting.className='betting-enabled';
     betting.checked=state.question_settings[unit.questions[0]].betting_enabled;
@@ -506,17 +526,121 @@ function renderQuestionSettings(state) {
       configs.push({q,kind,lines,correct});
     }
     const status=el('p','設定已儲存','field-hint');
-    const dirty=()=>{form.dataset.dirty='true'; status.textContent='尚未儲存';}; form.oninput=dirty; form.onchange=dirty;
+    const summarize=()=>{description.textContent=`${configs.map(c=>c.kind.value==='choice'?'單選':'簡答').filter((v,i,a)=>a.indexOf(v)===i).join('＋')} · ${betting.checked?'可下注':'不押分'}`;};
+    const dirty=()=>{form.dataset.dirty='true'; status.textContent='尚未儲存，開始前會一起儲存'; summarize(); updateSetupStatus();}; form.oninput=dirty; form.onchange=dirty; summarize();
     const button=el('button','儲存本題設定','primary'); button.type='submit'; fields.append(status,button); form.append(fields);
-    form.onsubmit=event=>{
-      event.preventDefault();
+    form.prepareSettings=()=>{
       const questions=configs.map(c=>({question:c.q,type:c.kind.value,options:c.kind.value==='choice'?c.lines():[],correct_index:c.correct.value===''?null:Number(c.correct.value)}));
-      action(button,async()=>{
-        fields.disabled=true;
-        try {await api(`/api/activities/${state.id}/question-settings`,{unit:unit.id,betting_enabled:betting.checked,questions}); form.dataset.dirty='false'; status.textContent='設定已儲存'; notice(`第 ${unit.id} 題設定已儲存。`,true); await refresh();}
-        finally {fields.disabled=false;}
-      });
+      for (const q of questions) if(q.type==='choice' && (q.options.length<2 || q.options.length>8 || q.options.some(x=>x.length>200) || new Set(q.options).size!==q.options.length || q.correct_index===null || q.correct_index>=q.options.length)) {
+        showTeacherView('questions'); details.open=true; const box=form.querySelector(`[data-question="${CSS.escape(q.question)}"]`); box.scrollIntoView({block:'center'}); box.querySelector(q.correct_index===null?'.choice-correct':'.choice-options').focus();
+        throw new Error(`第 ${q.question} 題：請填寫 2～8 個不重複選項（每項最多 200 字），並指定正確選項。`);
+      }
+      return {unit:unit.id,betting_enabled:betting.checked,questions};
     };
+    form.persistSettings=async payload=>{
+      try {await api(`/api/activities/${state.id}/question-settings`,payload); form.dataset.dirty='false'; status.textContent='設定已儲存'; updateSetupStatus();}
+      catch(error) {showTeacherView('questions'); details.open=true; summary.scrollIntoView({block:'center'}); throw new Error(`第 ${unit.id} 題儲存失敗：${error.message}`);}
+    };
+    form.onsubmit=event=>{event.preventDefault(); action(button,async()=>{
+      if(savingSettings) return;
+      const payload=form.prepareSettings();
+      await withSettingsLock(()=>form.persistSettings(payload)); notice(`第 ${unit.id} 題設定已儲存。`,true); await refresh();
+    });};
     details.append(summary,form); return details;
   }));
+}
+
+function setCreateSource(source) {
+  const manual=source==='manual'; $('create-form').hidden=!manual; $('sheets-create').hidden=manual;
+  $('source-manual').setAttribute('aria-pressed',String(manual)); $('source-sheets').setAttribute('aria-pressed',String(!manual));
+}
+function syncQuestionInput() {
+  const custom=$('custom-questions').open;
+  $('question-count').disabled=custom; $('question-numbers').disabled=!custom; $('question-numbers').required=custom;
+}
+function syncModeHelp() {
+  const sequential=$('quiz-mode').value==='sequential';
+  $('fairness-field').hidden=!sequential;
+  if(!sequential) $('quiz-fairness').checked=false;
+  $('mode-help').textContent=sequential?'一次開放一題，由你控制關題與下一題。':'開始後所有題目一起開放，學生自行選題作答。';
+}
+function updateSetupStatus() {
+  const count=document.querySelectorAll('.question-config-form[data-dirty="true"]').length;
+  const dirty=$('settings-form').dataset.dirty==='true' || count>0;
+  $('setup-status').textContent=dirty?'有尚未儲存的設定；按「儲存設定」或「儲存並開始搶答」會一起儲存。':'設定已儲存。可直接開始，或到「題目與計分」調整題型。';
+  $('setup-status').classList.toggle('unsaved',dirty);
+}
+function showTeacherView(view) {
+  teacherView=view;
+  if(current) renderTeacherWorkspace(current);
+}
+function renderTeacherWorkspace(state) {
+  const teacher=state.role==='teacher', preparing=state.phase==='preparing', ended=state.phase==='results';
+  $('teacher-tabs').hidden=!teacher; $('setup-status').hidden=!teacher || !preparing;
+  $('save-settings').hidden=!preparing;
+  for(const id of ['references','replay','classification']) $(`tool-${id}`).hidden=true;
+  $('result-actions').hidden=true;
+  if(!teacher) return;
+  const key=state.id+state.phase;
+  if(teacherViewKey!==key) {teacherViewKey=key; teacherView=preparing?'settings':ended?'results':'monitor';}
+  const allowed=preparing?['settings','questions','monitor']:ended?['results','monitor','tools']:['monitor','tools'];
+  for(const button of $('teacher-tabs').children) {
+    button.hidden=!allowed.includes(button.dataset.view);
+    button.setAttribute('aria-current',button.dataset.view===teacherView?'page':'false');
+    if(button.dataset.view==='monitor') button.textContent=preparing?`已加入小組（${state.groups.length}）`:`作答與批改（${state.answers.filter(a=>a.verdict==='pending').length} 待判定）`;
+  }
+  const sections={settings:['settings-form'],questions:['question-settings'],monitor:['teacher-monitor'],results:['results','scoreboard','result-actions'],tools:[]};
+  for(const id of ['settings-form','question-settings','teacher-monitor','results','scoreboard','result-actions']) $(id).hidden=!sections[teacherView]?.includes(id);
+  $('content-title').textContent={settings:'1. 設定活動方式',questions:'2. 設定題目與計分',monitor:preparing?'等待小組加入':'查看作答與批改',results:'本次搶答成果',tools:'更多教學工具'}[teacherView];
+  $('phase-help').textContent={settings:'保留預設也能直接開始。需要逐題控制時，切換開放方式。',questions:'單選自動批改；簡答由老師批改。每題可獨立開關下注。',monitor:preparing?'分享上方代碼；同組同學使用相同組名加入。':'答案自動更新。選擇題目可集中查看與批改。',results:'這裡顯示搶答成果與總分。需要改判時，切換到「作答與批改」。',tools:'需要時再展開。這些工具不影響原本的搶答流程。'}[teacherView];
+  for(const id of ['references','replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
+  $('download-csv').hidden=!ended; $('sheet-export-controls').hidden=!state.source;
+  $('start').textContent='儲存並開始搶答 →';
+  $('end').textContent=state.settings.mode==='sequential'?'提早結束整場':'結束搶答並公布結果';
+  updateSetupStatus();
+}
+function activitySettingsPayload() {
+  if(!$('quiz-duration').checkValidity()) {showTeacherView('settings'); $('quiz-duration').focus(); $('quiz-duration').reportValidity(); throw new Error('作答時間請填 0～3600 的整數秒。');}
+  return {mode:$('quiz-mode').value,fairness:$('quiz-fairness').checked,duration_seconds:Number($('quiz-duration').value)};
+}
+async function saveActivitySettings(payload=activitySettingsPayload()) {
+  try {await api(`/api/activities/${activityId}/settings`,payload); $('settings-form').dataset.dirty='false'; updateSetupStatus();}
+  catch(error) {showTeacherView('settings'); throw new Error(`活動規則儲存失敗：${error.message}`);}
+}
+async function saveAllSettings() {
+  // Validate all drafts before issuing any writes. A failed write never starts the activity.
+  const rules=activitySettingsPayload();
+  const drafts=[...document.querySelectorAll('.question-config-form[data-dirty="true"]')].map(form=>({form,payload:form.prepareSettings()}));
+  await withSettingsLock(async()=>{
+    if($('settings-form').dataset.dirty==='true') await saveActivitySettings(rules);
+    for(const draft of drafts) await draft.form.persistSettings(draft.payload);
+  });
+}
+async function withSettingsLock(save) {
+  savingSettings=true; updateInputs();
+  const controls=[...document.querySelectorAll('#settings-form input,#settings-form select,#settings-form button,#question-settings fieldset,#back,#logout')];
+  const previous=controls.map(control=>control.disabled); controls.forEach(control=>control.disabled=true);
+  try {await save();}
+  finally {controls.forEach((control,i)=>control.disabled=previous[i]); savingSettings=false; updateInputs();}
+}
+function syncMonitorFilter(state) {
+  const key=state.id+JSON.stringify(state.questions);
+  if(monitorKey!==key) {
+    monitorKey=key; monitorFollow=true;
+    $('monitor-question').replaceChildren(...['',...state.questions].map(q=>{const o=el('option',q?`第 ${q} 題`:'全部題目'); o.value=q; return o;}));
+  }
+  if(monitorFollow) $('monitor-question').value=state.settings.mode==='sequential' && state.phase==='active' ? state.units.find(u=>u.id===state.round.unit_id)?.questions[0] || '' : '';
+}
+$('create-panel').append($('sheets-create'));
+$('source-manual').onclick=()=>setCreateSource('manual'); $('source-sheets').onclick=()=>setCreateSource('sheets');
+$('custom-questions').ontoggle=syncQuestionInput;
+$('go-questions').onclick=()=>showTeacherView('questions');
+for(const button of $('teacher-tabs').children) button.onclick=()=>showTeacherView(button.dataset.view);
+$('monitor-question').onchange=()=>{monitorFollow=false; renderMonitor(current);};
+$('settings-form').oninput=$('settings-form').onchange=()=>{$('settings-form').dataset.dirty='true'; updateSetupStatus();};
+$('save-settings').onclick=()=>action($('save-settings'),async()=>{if(savingSettings) return; await saveAllSettings(); notice('所有設定已儲存。',true); await refresh();});
+$('result-actions').append($('download-csv'),$('sheet-export-controls'));
+for(const [id,title] of [['references','提供參考答案'],['replay','重播搶答過程'],['classification','比較相似答案']]) {
+  const section=$(id), wrapper=el('details',undefined,'tool-disclosure panel'); wrapper.id=`tool-${id}`; wrapper.hidden=true;
+  const summary=el('summary',title); section.before(wrapper); wrapper.append(summary,section);
 }

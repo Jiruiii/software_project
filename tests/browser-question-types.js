@@ -6,10 +6,11 @@ async (page) => {
     page.on('pageerror',e=>errors.push(String(e)));
     await page.locator('#choose-teacher').click(); await page.locator('#teacher-password').fill('extras-test-only');
     await page.locator('#login-form button').click(); await page.locator('#activity-title').fill('題型與不押驗收');
-    await page.locator('#question-numbers').fill('1\n2\n3\n4'); await page.locator('#create-form button').click();
-    await page.locator('#question-settings').waitFor({state:'visible'});
-    await page.locator('#quiz-mode').selectOption('sequential'); await page.locator('#settings-form button').click();
+    await page.locator('#question-count').fill('4'); await page.locator('#create-form button').click();
+    await page.locator('#settings-form').waitFor({state:'visible'});
+    await page.locator('#quiz-mode').selectOption('sequential'); await page.locator('#settings-form button[type="submit"]').click();
     await page.locator('#notice').filter({hasText:'活動規則已儲存'}).waitFor();
+    await page.locator('#teacher-tabs [data-view="questions"]').click();
     const configure=async(q,type,bet)=>{
       const box=page.locator(`.question-config-unit[data-unit="${q}"]`);
       if (!await box.getAttribute('open').then(x=>x!==null)) await box.locator('summary').click();
@@ -21,7 +22,7 @@ async (page) => {
       await box.locator('form[data-dirty="false"]').waitFor();
     };
     await page.locator('.question-type').first().selectOption('choice'); await page.locator('#start').click();
-    check((await page.locator('#notice').innerText()).includes('請先儲存'),'unsaved settings silently ignored');
+    check((await page.locator('#notice').innerText()).includes('第 1 題'),'invalid settings silently ignored');
     await configure('1','choice',true); await configure('2','choice',false); await configure('4','short',false);
     const code=await page.locator('#session-code').innerText();
     for (const name of ['測試A組','測試B組']) {
@@ -66,6 +67,7 @@ async (page) => {
     await a.locator('#answer-3').fill('不押的簡答'); await a.locator('.question-card').nth(3).locator('button').click();
     await a.waitForFunction(()=>current.answers.length===4);
     await page.locator('#close-round').click(); await a.locator('#results').waitFor({state:'visible'});
+    await page.locator('#teacher-tabs [data-view="monitor"]').click(); await page.locator('#monitor-question').selectOption('4');
     await page.getByRole('button',{name:'測試A組 第 4 題判為錯誤',exact:true}).click();
     await a.waitForFunction(()=>current.own_score.pending_units===0);
     check(await a.evaluate(()=>current.own_score.total===-1),'zero stake deducted');
