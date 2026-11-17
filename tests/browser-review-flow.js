@@ -14,10 +14,19 @@ async page => {
     await student.locator('#join-code').fill(a.code);await student.locator('#join-group').fill('第一組');await student.locator('#join-form button').click();
     await page.locator('#start').click();await student.waitForFunction(()=>!document.querySelector('#answer-0').disabled);
     await student.locator('#answer-0').fill('第一題回答');await student.locator('.question-card').nth(0).locator('button').click();
-    await page.waitForFunction(()=>current.answers.length===1);await page.locator('#close-round').click();
+    await page.waitForFunction(()=>current.answers.length===1);
+    check(await page.locator('#teacher-tabs [data-view="monitor"]').innerText()==='作答與批改','Unclosed answers counted as reviewable');
+    await student.setViewportSize({width:390,height:844});
+    check(await student.locator('#answer-1').isHidden(),'Upcoming question shows disabled form');
+    await student.screenshot({path:'output/playwright/ui-student-active-mobile.png',fullPage:true});
+    await page.locator('#close-round').click();
+    await page.waitForFunction(()=>current.round.round_open===0);
+    check(await page.locator('#phase-label').innerText()==='本題已關閉','Closed round says active');
+    check((await page.locator('#teacher-tabs [data-view="monitor"]').innerText()).includes('1 待批改'),'Closed pending count missing');
     await page.locator('#references > summary').click();await page.locator('#reference-answer').fill('第一題草稿');
     check(await page.locator('#reference-question').count()===0,'Independent selector remains');
     await page.locator('#next-round').click();await page.waitForFunction(()=>current.round.unit_id==='2');
+    await student.locator('#answer-1').waitFor({state:'visible'});
     check(await page.locator('#monitor-question').inputValue()==='2','Shared selector did not follow');
     check(await page.locator('#reference-form').isHidden(),'Open question reference form editable');
     await page.locator('#monitor-question').selectOption('1');check(await page.locator('#reference-answer').inputValue()==='第一題草稿','Draft lost');
@@ -47,10 +56,24 @@ async page => {
     await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,0));
     check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Teacher mobile overflow');
     await page.screenshot({path:'output/playwright/review-flow-mobile.png',fullPage:true});
+    check(await page.locator('#grading-review').isHidden(),'Review workspace has redundant review button');
     await student.setViewportSize({width:390,height:844});check(await student.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Student mobile overflow');
     await student.screenshot({path:'output/playwright/review-flow-student.png',fullPage:true});
+    for(const [target,name] of [[page,'teacher'],[student,'student']]) {
+      await target.setViewportSize({width:320,height:720});
+      check(await target.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${name} narrow overflow`);
+      await target.screenshot({path:`output/playwright/ui-${name}-320.png`,fullPage:true});
+    }
+    await student.locator('#scoreboard .scoring-help > summary').focus();await student.keyboard.press('Enter');
+    check(await student.locator('#scoreboard .scoring-help').evaluate(e=>e.open),'Scoring help not keyboard accessible');
+    await student.evaluate(async()=>{await refresh();});
+    check(await student.locator('#scoreboard .scoring-help').evaluate(e=>e.open),'Polling reset scoring help');
     await page.getByRole('button',{name:'第一組 第 2 題判為正確',exact:true}).click();await student.waitForFunction(()=>current.grading.complete);
     check(!errors.length,errors.join('\n'));
-    return {passed:true,checks:['single-question-selector','round-follow','closed-only-editing','per-question-drafts','all-selection-safe','provisional-results','student-provisional','review-shortcut','automatic-completion','undo-provisional','mobile-layout'],pageErrors:errors};
+    return {passed:true,checks:['single-question-selector','round-follow','closed-only-editing','per-question-drafts','all-selection-safe','provisional-results','student-provisional','review-shortcut','automatic-completion','undo-provisional','mobile-layout','closed-round-label','reviewable-pending-count','no-redundant-review-button','320px-layout','keyboard-help-retained'],pageErrors:errors};
+  } catch(error) {
+    await page.screenshot({path:'output/playwright/ui-review-failure.png',fullPage:true});
+    const state=await page.evaluate(()=>({phase:current?.phase,round:current?.round,answers:current?.answers?.length}));
+    throw new Error(error.message+' '+JSON.stringify(state));
   } finally {if(student)await student.close();}
 }

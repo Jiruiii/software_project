@@ -96,7 +96,25 @@ async (page) => {
   await page.locator('#reference-answer').fill('全題補充答案');await page.locator('#reference-save').click();
   await page.waitForFunction(()=>current.references['2']==='全題補充答案');
   await studentPage.waitForFunction(()=>document.querySelector('#report-table').textContent.includes('全題補充答案'));
+  await page.evaluate(async aid=>{selectActivity(aid);await refresh();},session.id);
+  await page.route(base+path,async route=>{
+    const response=await route.fetch(),state=await response.json();
+    state.source.sync={state:'needs_auth',message:'Google 連線已失效，請返回活動清單重新連線。'};
+    await route.fulfill({response,json:state});
+  });
+  await page.evaluate(async()=>{await refresh();});
+  check(await page.locator('#sheet-sync-help').evaluate(e=>!e.open),'Sync explanation not collapsed by default');
+  check(await page.locator('#sheet-export').isVisible(),'Retry hidden with collapsed help');
+  check((await page.locator('#sheet-sync-status').innerText()).includes('連線已失效'),'Auth failure not visible');
+  await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,0));
+  await page.screenshot({path:'output/playwright/ui-sync-error-mobile.png',fullPage:true});
+  await page.locator('#sheet-sync-help > summary').click();await page.evaluate(async()=>{await refresh();});
+  check(await page.locator('#sheet-sync-help').evaluate(e=>e.open),'Polling closed sync help');
+  await page.setViewportSize({width:320,height:720});
+  check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Sync narrow overflow');
+  await page.screenshot({path:'output/playwright/ui-sync-error-320.png',fullPage:true});
+  await page.unroute(base+path);
   await studentPage.close();
   check(!errors.length,errors.join('\n'));
-  return {passed:true,checks:['closed-only','reference-override','cancel-restores-winner','polling-draft','switch-draft','reload-persistence','no-answers','student-report-score','all-mode','mobile-layout','student-immediate-reference','student-update-clear','student-reference-reload','student-previous-round','student-safe-text','student-mobile-layout'],pageErrors:errors};
+  return {passed:true,checks:['closed-only','reference-override','cancel-restores-winner','polling-draft','switch-draft','reload-persistence','no-answers','student-report-score','all-mode','mobile-layout','student-immediate-reference','student-update-clear','student-reference-reload','student-previous-round','student-safe-text','student-mobile-layout','collapsed-sync-error-visible','sync-help-retained','sync-320px'],pageErrors:errors};
 }

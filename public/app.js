@@ -214,7 +214,7 @@ function renderCards(state) {
       field.append(label,input,saved,time,reference); card.append(field);
     }
     const betting=state.question_settings[unit.questions[0]].betting_enabled;
-    const label=el('label',betting?'信心下注（可不押，題組只計一次分）':'本題未開放下注'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
+    const label=el('label',betting?`信心下注（可不押${unit.questions.length>1?'，整題組計一次分':''}）`:'本題未開放下注'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
     for (const v of betting?[0,1,2,3]:[0]) {const option=el('option',v===0?'不押（0 分）':`${v} 分`); option.value=v; stake.append(option);}
     card.dataset.betting=String(betting);
     const button=el('button',unit.questions.length>1?'一次送出整個題組 →':'送出本組答案 →','primary wide'); button.type='submit';
@@ -250,7 +250,12 @@ function updateInputs() {
     const disabled=sent || !connected || current.phase!=='active' || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.unit);
     const button=card.querySelector('button'), stake=card.querySelector('.stake'); button.disabled=stake.disabled=disabled; button.hidden=sent;
     if (card.dataset.betting==='false') stake.disabled=true;
-    card.classList.toggle('sent',sent); card.querySelector('.question-status').textContent=sent?'✓ 已送出':'尚未送出';
+    const unitIndex=current.units.findIndex(u=>u.id===card.dataset.unit);
+    const sequential=current.settings.mode==='sequential';
+    const upcoming=current.phase==='preparing' || (sequential && unitIndex>current.round.round_index);
+    const closed=current.phase==='results' || (sequential && (unitIndex<current.round.round_index || (unitIndex===current.round.round_index && !current.round.round_open)));
+    card.classList.toggle('upcoming',upcoming);
+    card.classList.toggle('sent',sent); card.querySelector('.question-status').textContent=sent?'✓ 已送出':upcoming?'尚未開放':closed?'已關閉 · 未作答':'尚未送出';
     if (sent) {stake.value=answers.get(card.dataset.question).stake; sessionStorage.removeItem(card.dataset.draftKey);}
     for (const field of fields) {
       const answer=answers.get(field.dataset.question), input=field.querySelector('.answer-input'); input.disabled=disabled; input.hidden=!!answer;
@@ -369,7 +374,8 @@ function renderState(state) {
   const provisional=ended && !state.grading.complete;
   $('grading-status').hidden=!ended;
   if(ended) {
-    $('grading-message').textContent=provisional?`作答已結束 · 暫時成績：還有 ${state.grading.pending_answers} 筆答案待批改，分數與排名可能改變。`:'作答已結束 · 批改完成，目前沒有待批改答案。';
+    $('grading-message').textContent=provisional?`暫時成績 · ${state.grading.pending_answers} 筆待批改，分數與排名可能改變。`:'批改完成 · 所有答案皆已判定。';
+    $('grading-status').classList.toggle('complete',!provisional);
     $('scoreboard').querySelector('h3').textContent=`小組得分排行（${provisional?'暫時成績':'批改完成'}）`;
     $('group-report').querySelector('h3').textContent=`本組學習報告（${provisional?'暫時成績':'批改完成'}）`;
   }
@@ -381,9 +387,10 @@ function renderState(state) {
   if (!teacher) {
     $('own-score-total').textContent=`${state.own_score.total} 分`;
     const waiting=[];
-    if(state.own_score.awaiting_close_units) waiting.push(`${state.own_score.awaiting_close_units} 個作答單位待關題公布`);
-    if(state.own_score.pending_units) waiting.push(`${state.own_score.pending_units} 個已關題作答單位等待批改`);
-    $('own-score-pending').textContent=waiting.length?waiting.join('；'):'目前沒有待公布或待批改項目';
+    if(state.own_score.awaiting_close_units) waiting.push(`${state.own_score.awaiting_close_units} 題待關題公布`);
+    if(state.own_score.pending_units) waiting.push(`${state.own_score.pending_units} 題待批改`);
+    $('own-score-pending').textContent=waiting.join(' · ');
+    $('own-score-pending').hidden=!waiting.length;
   }
   $('scoreboard').hidden=!ended;
   if (ended && $('scoreboard').dataset.values!==JSON.stringify([state.scoreboard,provisional])) {
@@ -401,19 +408,24 @@ function renderState(state) {
   updateClusterControls();
   $("session-title").textContent = state.title;
   $("session-code").textContent = state.code;
-  $("session-subtitle").textContent = teacher ? `${state.questions.length} 道題目 · ${state.groups.length} 個小組已加入` : `${state.group_name} · ${state.questions.length} 道題目，一起完成`;
+  $("session-subtitle").textContent = teacher ? `${state.questions.length} 道題目 · ${state.groups.length} 個小組已加入` : `${state.questions.length} 道題目`;
   $("role-badge").textContent = teacher ? "教師" : state.group_name;
   $("teacher-controls").hidden = !teacher || ended;
   $("start").hidden = state.phase !== "preparing";
   $("end").hidden = state.phase !== "active";
   $("phase-label").textContent = phaseNames[state.phase]; $("phase-label").className = "phase-pill " + state.phase;
+  if(ended) $('phase-label').textContent='作答結束';
+  else if(state.phase==='active' && state.settings.mode==='sequential') {
+    $('phase-label').textContent=state.round.round_open?'本題作答中':'本題已關閉';
+    $('phase-label').classList.toggle('active',!!state.round.round_open);
+  }
   for (const step of document.querySelectorAll(".phase-steps li")) {
     step.classList.toggle("current", step.dataset.phase === state.phase);
     if (step.dataset.phase === state.phase) step.setAttribute("aria-current", "step"); else step.removeAttribute("aria-current");
   }
   $("session-rule").textContent = teacher ? "每組每題以第一筆有效答案為準。作答中請勿向學生投影此頁，以免公開他組答案。" : "每題由小組共同送出一份答案。送出後不能修改；結果公布前看不到其他組別的作答。";
   $("content-title").textContent = ended ? "本次搶答成果" : teacher ? "小組作答狀況" : "本組作答區";
-  $("phase-help").textContent = ended ? "依伺服器收到答案的先後順序公布。搶答成功不代表答案已判定正確。" : state.phase === "preparing" ? "同學可以先加入。老師開始搶答後，作答區會自動開放。" : teacher ? "答案會自動更新。結束搶答後，所有同學才能看到成功組別。" : "搶答進行中。確認本組答案後送出，無需重新整理頁面。";
+  $("phase-help").textContent = ended ? "搶答成功代表最快且未判錯，請一併查看判定。" : state.phase === "preparing" ? "等待老師開始，作答區會自動開放。" : teacher ? "答案會自動更新。" : "每組送出一份答案，送出後不能修改。";
   $("student-questions").hidden = teacher || ended;
   $("teacher-monitor").hidden = !teacher;
   $("results").hidden = !ended;
@@ -432,7 +444,7 @@ function renderState(state) {
   $("round-controls").hidden = !teacher || !sequential || state.phase !== "active";
   $("close-round").hidden = !state.round.round_open;
   $("next-round").hidden = !!state.round.round_open;
-  $("round-status").hidden = !sequential || (teacher && state.phase==='preparing');
+  $("round-status").hidden = !sequential || ended || (teacher && state.phase==='preparing');
   const priorityLeft = Math.max(0, Math.ceil(state.round.priority_until - state.server_time));
   $("round-status").textContent = state.round.unit_id === null ? "逐題模式：老師開始後開放第一題。" :
     `目前第 ${state.round.unit_id} 題 · ${state.round.round_open && !ended ? "作答中" : "已關閉"}` +
@@ -440,7 +452,7 @@ function renderState(state) {
   $("sheet-export-controls").hidden = !teacher || !state.source;
   if (teacher && state.source) {
     const sync=state.source.sync || {state:'idle',message:'關題後自動同步學習單。'};
-    $("source-name").textContent = `來源：${state.source.sheet_title}`;
+    $("source-name").textContent = state.source.sheet_title;
     $('sheet-sync-status').textContent=sync.message;
     $('sheet-sync-status').dataset.state=sync.state;
     $("source-link").href = state.source.url;
@@ -448,7 +460,10 @@ function renderState(state) {
     $("sheet-export").textContent = '重試同步';
   }
   if (teacher) {syncMonitorFilter(state); renderMonitor(state);} else renderCards(state);
-  if(teacher && state.settings.legacy_fairness) $('round-status').textContent+=' · 舊活動缺少歷史保底紀錄，保留既有累計並從更新後接續計算。';
+  if(teacher && state.settings.legacy_fairness) {
+    $('round-status').hidden=false;
+    $('round-status').textContent=(ended?'':$('round-status').textContent+' · ')+'舊活動缺少歷史保底紀錄，保留既有累計並從更新後接續計算。';
+  }
   if (ended) renderResults(state);
   renderTeacherWorkspace(state);
   updateInputs();
@@ -509,10 +524,11 @@ function renderTeacherReference(state) {
   if($('reference-answer').value!==draft.answer) $('reference-answer').value=draft.answer;
   $('reference-override').checked=draft.override;
   $('reference-override-field').hidden=!state.source;
-  $('reference-sheet-help').textContent=state.source?'勾選並儲存後，學習單以老師答案為準；取消勾選並儲存後，恢復最快未判錯組的答案，無有效答案則還原原值。':'此活動沒有連結學習單，答案只存入學生報告。';
+  $('reference-sheet-help').hidden=!state.source;
+  $('reference-sheet-help').textContent=state.source?'取消勾選並儲存，恢復最快未判錯組的答案；無有效答案則還原原值。':'';
   $('reference-summary').textContent=`第 ${q} 題 · 老師正確答案（選填）`;
   $('reference-save').disabled=draft.saving;
-  $('reference-status').textContent=draft.saving?'儲存中…':draft.dirty?'尚未儲存':draft.answer?(draft.override?'已儲存 · 已指定用於學習單':'已儲存 · 僅供報告參考'):'尚未填寫，可直接繼續';
+  $('reference-status').textContent=draft.saving?'儲存中…':draft.dirty?'尚未儲存':draft.answer?(draft.override?'已儲存 · 已指定用於學習單':'已儲存 · 學生可見'):'';
 }
 function captureReferenceDraft() {
   if(current?.role!=='teacher') return;
@@ -712,7 +728,7 @@ function syncModeHelp() {
 function updateSetupStatus() {
   const count=document.querySelectorAll('.question-config-form[data-dirty="true"]').length;
   const dirty=$('settings-form').dataset.dirty==='true' || count>0;
-  $('setup-status').textContent=dirty?'有尚未儲存的變更。開始搶答時會先儲存並檢查所有設定。':'所有設定已儲存。準備好後按「開始搶答」。';
+  $('setup-status').textContent=dirty?'尚未儲存 · 按「開始搶答」也會一起儲存。':'設定已儲存，可以開始搶答。';
   $('setup-status').classList.toggle('unsaved',dirty);
 }
 function showTeacherView(view) {
@@ -731,15 +747,18 @@ function renderTeacherWorkspace(state) {
   const key=state.id+state.phase;
   if(teacherViewKey!==key) {teacherViewKey=key; teacherView=preparing?'settings':ended?'results':'monitor';}
   const allowed=preparing?['settings','questions','monitor']:ended?['results','monitor','tools']:['monitor','tools'];
+  const pending=state.answers.filter(a=>a.verdict==='pending' && state.reviewable_questions.includes(a.question_id)).length;
   for(const button of $('teacher-tabs').children) {
     button.hidden=!allowed.includes(button.dataset.view);
     button.setAttribute('aria-current',button.dataset.view===teacherView?'page':'false');
-    if(button.dataset.view==='monitor') button.textContent=preparing?`已加入小組（${state.groups.length}）`:`作答與批改（${state.answers.filter(a=>a.verdict==='pending').length} 待批改）`;
+    if(button.dataset.view==='monitor') button.textContent=preparing?`已加入小組（${state.groups.length}）`:`作答與批改${pending?`（${pending} 待批改）`:''}`;
   }
   const sections={settings:['settings-form'],questions:['question-settings'],monitor:['teacher-monitor'],results:['results','scoreboard','result-actions'],tools:[]};
   for(const id of ['settings-form','question-settings','teacher-monitor','results','scoreboard','result-actions']) $(id).hidden=!sections[teacherView]?.includes(id);
   $('content-title').textContent={settings:'1. 設定活動方式',questions:'2. 設定題目與計分',monitor:preparing?'等待小組加入':'查看作答與批改',results:'本次搶答成果',tools:'更多教學工具'}[teacherView];
-  $('phase-help').textContent={settings:'保留預設也能直接開始。需要逐題控制時，切換開放方式。',questions:'單選自動批改；簡答由老師批改。每題可獨立開關下注。',monitor:preparing?'分享上方代碼；同組同學使用相同組名加入。':'答案自動更新。選擇題目可集中查看與批改。',results:'這裡顯示搶答成果與總分。需要改判時，切換到「作答與批改」。',tools:'需要時再展開。這些工具不影響原本的搶答流程。'}[teacherView];
+  $('phase-help').textContent={settings:'選擇開放方式與時間，再設定題目。',questions:'單選自動批改；簡答由老師批改。開始後不能修改設定。',monitor:preparing?'分享活動代碼；同組使用相同組名。':'答案自動更新，關題後可批改。',results:'選題查看成功答案，全部組別總分列於下方。',tools:'選擇需要的工具展開。'}[teacherView];
+  $('grading-review').hidden=!ended || !pending || teacherView==='monitor';
+  $('monitor-privacy').hidden=preparing;
   for(const id of ['replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
   renderTeacherReference(state);
   $('teacher-question-filter').hidden=preparing || !['monitor','results'].includes(teacherView);
