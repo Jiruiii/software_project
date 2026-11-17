@@ -46,7 +46,7 @@ async (page) => {
     for(const student of [a,b]) {
       await student.waitForFunction(()=>current.answers.length===1);
       check(await student.evaluate(()=>current.own_score.total===0 && current.own_score.awaiting_close_units===1 && current.own_score.pending_units===0 && current.answers[0].verdict==='withheld'),'Open question leaked grading');
-      check((await student.locator('#own-score-pending').innerText()).includes('待關題公布'),'Missing withheld hint');
+      check((await student.locator('#own-score-pending').innerText()).includes('已送出 1 題，等待本題結束'),'Missing withheld hint');
     }
     await a.setViewportSize({width:390,height:844});
     await a.screenshot({path:'output/playwright/score-publication-before-close.png',fullPage:true});

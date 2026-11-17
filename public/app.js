@@ -1,7 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const phaseNames = {preparing: "準備中", active: "作答中", results: "結果"};
-const verdictNames = {pending:"待批改", withheld:"待關題公布", correct:"正確", incorrect:"錯誤", unanswered:"未作答"};
+const verdictNames = {pending:"待批改", withheld:"等待本題結束", correct:"正確", incorrect:"錯誤", unanswered:"未作答"};
 let auth = null, activityId = null, current = null, generation = 0;
 let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", lastResults = "", lastList = "";
 const pendingAnswers = new Set();
@@ -387,7 +387,7 @@ function renderState(state) {
   if (!teacher) {
     $('own-score-total').textContent=`${state.own_score.total} 分`;
     const waiting=[];
-    if(state.own_score.awaiting_close_units) waiting.push(`${state.own_score.awaiting_close_units} 題待關題公布`);
+    if(state.own_score.awaiting_close_units) waiting.push(`已送出 ${state.own_score.awaiting_close_units} 題，等待${state.settings.mode==='sequential'?'本題':'搶答'}結束`);
     if(state.own_score.pending_units) waiting.push(`${state.own_score.pending_units} 題待批改`);
     $('own-score-pending').textContent=waiting.join(' · ');
     $('own-score-pending').hidden=!waiting.length;
