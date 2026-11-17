@@ -166,14 +166,7 @@ async function downloadFile(path, filename) {
   link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 $("download-csv").onclick = () => action($("download-csv"), () => downloadFile(`/api/activities/${activityId}/csv`, "課堂搶答結果.csv"));
-$("settings-form").onsubmit = event => {
-  event.preventDefault(); action(event.submitter, async () => {
-    if(savingSettings) return;
-    const payload=activitySettingsPayload();
-    await withSettingsLock(()=>saveActivitySettings(payload));
-    notice("活動規則已儲存。", true); await refresh();
-  });
-};
+$("settings-form").onsubmit = event => event.preventDefault();
 $("quiz-mode").onchange = syncModeHelp;
 for (const [id, kind] of [["close-round","close"],["next-round","next"]]) $(id).onclick = () => action($(id), async () => {
   await api(`/api/activities/${activityId}/round`, {action:kind}); await refresh();
@@ -528,7 +521,7 @@ function renderQuestionSettings(state) {
     const status=el('p','設定已儲存','field-hint');
     const summarize=()=>{description.textContent=`${configs.map(c=>c.kind.value==='choice'?'單選':'簡答').filter((v,i,a)=>a.indexOf(v)===i).join('＋')} · ${betting.checked?'可下注':'不押分'}`;};
     const dirty=()=>{form.dataset.dirty='true'; status.textContent='尚未儲存，開始前會一起儲存'; summarize(); updateSetupStatus();}; form.oninput=dirty; form.onchange=dirty; summarize();
-    const button=el('button','儲存本題設定','primary'); button.type='submit'; fields.append(status,button); form.append(fields);
+    fields.append(status); form.append(fields);
     form.prepareSettings=()=>{
       const questions=configs.map(c=>({question:c.q,type:c.kind.value,options:c.kind.value==='choice'?c.lines():[],correct_index:c.correct.value===''?null:Number(c.correct.value)}));
       for (const q of questions) if(q.type==='choice' && (q.options.length<2 || q.options.length>8 || q.options.some(x=>x.length>200) || new Set(q.options).size!==q.options.length || q.correct_index===null || q.correct_index>=q.options.length)) {
@@ -541,11 +534,7 @@ function renderQuestionSettings(state) {
       try {await api(`/api/activities/${state.id}/question-settings`,payload); form.dataset.dirty='false'; status.textContent='設定已儲存'; updateSetupStatus();}
       catch(error) {showTeacherView('questions'); details.open=true; summary.scrollIntoView({block:'center'}); throw new Error(`第 ${unit.id} 題儲存失敗：${error.message}`);}
     };
-    form.onsubmit=event=>{event.preventDefault(); action(button,async()=>{
-      if(savingSettings) return;
-      const payload=form.prepareSettings();
-      await withSettingsLock(()=>form.persistSettings(payload)); notice(`第 ${unit.id} 題設定已儲存。`,true); await refresh();
-    });};
+    form.onsubmit=event=>event.preventDefault();
     details.append(summary,form); return details;
   }));
 }
@@ -567,7 +556,7 @@ function syncModeHelp() {
 function updateSetupStatus() {
   const count=document.querySelectorAll('.question-config-form[data-dirty="true"]').length;
   const dirty=$('settings-form').dataset.dirty==='true' || count>0;
-  $('setup-status').textContent=dirty?'有尚未儲存的設定；按「儲存設定」或「儲存並開始搶答」會一起儲存。':'設定已儲存。可直接開始，或到「題目與計分」調整題型。';
+  $('setup-status').textContent=dirty?'有尚未儲存的變更。開始搶答時會先儲存並檢查所有設定。':'所有設定已儲存。準備好後按「開始搶答」。';
   $('setup-status').classList.toggle('unsaved',dirty);
 }
 function showTeacherView(view) {
@@ -595,7 +584,7 @@ function renderTeacherWorkspace(state) {
   $('phase-help').textContent={settings:'保留預設也能直接開始。需要逐題控制時，切換開放方式。',questions:'單選自動批改；簡答由老師批改。每題可獨立開關下注。',monitor:preparing?'分享上方代碼；同組同學使用相同組名加入。':'答案自動更新。選擇題目可集中查看與批改。',results:'這裡顯示搶答成果與總分。需要改判時，切換到「作答與批改」。',tools:'需要時再展開。這些工具不影響原本的搶答流程。'}[teacherView];
   for(const id of ['references','replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
   $('download-csv').hidden=!ended; $('sheet-export-controls').hidden=!state.source;
-  $('start').textContent='儲存並開始搶答 →';
+  $('start').textContent='開始搶答 →';
   $('end').textContent=state.settings.mode==='sequential'?'提早結束整場':'結束搶答並公布結果';
   updateSetupStatus();
 }

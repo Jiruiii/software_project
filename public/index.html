@@ -80,7 +80,7 @@
         <aside class="session-sidebar">
           <div class="code-block"><span>活動代碼</span><strong id="session-code"></strong><p>讓同學在另一個分頁輸入此代碼。</p></div>
           <ol class="phase-steps" aria-label="活動階段"><li data-phase="preparing"><span>01</span><div>準備中<small>加入小組，準備作答</small></div></li><li data-phase="active"><span>02</span><div>作答中<small>思考答案，即時送出</small></div></li><li data-phase="results"><span>03</span><div>結果<small>看看每題的搶答成果</small></div></li></ol>
-          <div id="teacher-controls" hidden><button id="save-settings" class="secondary">儲存設定</button><button id="start" class="primary">儲存並開始搶答 →</button><button id="end" class="danger" hidden>結束活動</button></div>
+          <div id="teacher-controls" hidden><button id="save-settings" class="secondary">儲存設定</button><button id="start" class="primary">開始搶答 →</button><button id="end" class="danger" hidden>結束活動</button></div>
           <div id="round-controls" hidden><button id="close-round" class="danger wide">關閉本題</button><button id="next-round" class="primary wide">開啟下一題 →</button></div>
           <p id="session-rule" class="sidebar-note"></p>
           <div id="sheet-export-controls" hidden><p id="source-name" class="sidebar-note"></p><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟來源學習單 ↗</a><button id="sheet-export" class="primary wide">寫回成功答案 →</button><p class="field-hint">只修改原學習單的答案格。匯出期間請勿移動原表列欄；Google 尚未連線時，先返回活動清單連線。</p></div>
@@ -100,7 +100,7 @@
             <label id="fairness-field" class="check-label" hidden><input id="quiz-fairness" type="checkbox">保底先答：連續 3 題未成功，下題先答 3 秒</label>
             <label for="quiz-duration">作答時間（秒）</label><input id="quiz-duration" type="number" min="0" max="3600" step="1" value="0" required>
             <p class="field-hint">填 0 表示不限時。逐題模式會每題重新倒數，含保底先答時間。</p>
-            <div class="form-actions"><button class="secondary" type="submit">儲存活動規則</button><button id="go-questions" class="primary" type="button">下一步：題目與計分 →</button></div>
+            <div class="form-actions"><button id="go-questions" class="primary" type="button">下一步：題目與計分 →</button></div>
           </form>
           <section id="question-settings" class="panel" hidden><h3>題型與下注</h3><p class="field-hint">每題可選簡答或單選，並獨立決定是否開放下注。單選自動批改每組，簡答由老師批改；開始後不能修改。題組共用一次下注。</p><div id="question-settings-forms"></div></section>
           <div id="results" hidden></div>

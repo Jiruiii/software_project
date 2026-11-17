@@ -18,7 +18,12 @@ async (page) => {
     await page.setViewportSize({width:1280,height:900}); await page.locator('#quiz-mode').selectOption('sequential');
     await page.locator('#quiz-duration').fill('-1'); await page.locator('#start').click();
     check(await page.evaluate(()=>current.phase==='preparing'),'invalid duration started'); await page.locator('#quiz-duration').fill('0');
-    await capture('settings-desktop'); await page.locator('#go-questions').click();
+    await capture('settings-desktop');
+    check(await page.locator('#activity button:visible').filter({hasText:'儲存'}).count()===1,'duplicate saves in activity settings');
+    check(await page.locator('#start').innerText()==='開始搶答 →','ambiguous start label');
+    await page.setViewportSize({width:390,height:844}); await capture('settings-mobile'); await page.setViewportSize({width:1280,height:900});
+    await page.locator('#go-questions').click();
+    check(await page.locator('#activity button:visible').filter({hasText:'儲存'}).count()===1,'duplicate saves in question settings');
     const first=page.locator('.question-config-unit').first(); await first.locator('.question-type').selectOption('choice');
     await first.locator('.choice-options').fill('二氧化碳與水\n氧氣與葡萄糖\n只有陽光');
     await page.locator('#start').click(); check((await page.locator('#notice').innerText()).includes('第 1 題'),'missing answer not located');
@@ -70,7 +75,7 @@ async (page) => {
     await page.locator('#start').click(); await page.locator('#teacher-monitor').waitFor({state:'visible'});
     check(await page.evaluate(()=>current.phase==='active' && current.settings.duration_seconds===60 && !current.question_settings.A.betting_enabled),'start did not save all drafts');
     check(!errors.length,errors.join('\n'));
-    return {passed:true,sourceSwitch:true,countAndCustomNumbers:true,stageNavigation:true,bulkSave:true,saveAndStart:true,invalidSettingLocated:true,failedSaveBlocksStart:true,filterRetained:true,manualGradeAndTools:true,mobileWidth:390,screenshots:11,pageErrors:errors};
+    return {passed:true,sourceSwitch:true,countAndCustomNumbers:true,stageNavigation:true,singleSaveControl:true,bulkSave:true,saveAndStart:true,invalidSettingLocated:true,failedSaveBlocksStart:true,filterRetained:true,manualGradeAndTools:true,mobileWidth:390,screenshots:12,pageErrors:errors};
   } catch(error) {await page.screenshot({path:'output/playwright/teacher-ui-failure.png',fullPage:true}); throw new Error(`${stage}: ${error.message}`);}
   finally {if(student) await student.close();}
 }

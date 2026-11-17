@@ -22,9 +22,9 @@ async (page) => {
   stage='line 13';
   await page.locator('#quiz-fairness').check();
   stage='line 14';
-  await page.locator('#settings-form button[type="submit"]').click();
+  await page.locator('#save-settings').click();
   stage='line 15';
-  await page.locator('#notice').filter({hasText:'活動規則已儲存'}).waitFor();
+  await page.locator('#notice').filter({hasText:'所有設定已儲存'}).waitFor();
   stage='line 16';
   const student=await page.context().newPage(); await student.goto(base);
   stage='line 17';
@@ -198,8 +198,8 @@ async (page) => {
   await page.locator('#back').click(); await page.locator('#activity-title').fill('倒數驗收');
   await page.locator('#question-count').fill('1'); await page.locator('#create-form button').click();
   await page.locator('#session-title').filter({hasText:'倒數驗收'}).waitFor({state:'visible'});
-  await page.locator('#quiz-duration').fill('2'); await page.locator('#settings-form button[type="submit"]').click();
-  await page.locator('#notice').filter({hasText:'活動規則已儲存'}).waitFor();
+  await page.locator('#quiz-duration').fill('2'); await page.locator('#save-settings').click();
+  await page.locator('#notice').filter({hasText:'所有設定已儲存'}).waitFor();
   await page.locator('#start').click(); await page.locator('#countdown').waitFor({state:'visible'});
   await page.locator('#results').waitFor({state:'visible'});
   check(await page.locator('#countdown').isHidden(),'countdown still active after expiry');

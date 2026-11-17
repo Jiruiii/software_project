@@ -8,8 +8,8 @@ async (page) => {
     await page.locator('#login-form button').click(); await page.locator('#activity-title').fill('題型與不押驗收');
     await page.locator('#question-count').fill('4'); await page.locator('#create-form button').click();
     await page.locator('#settings-form').waitFor({state:'visible'});
-    await page.locator('#quiz-mode').selectOption('sequential'); await page.locator('#settings-form button[type="submit"]').click();
-    await page.locator('#notice').filter({hasText:'活動規則已儲存'}).waitFor();
+    await page.locator('#quiz-mode').selectOption('sequential'); await page.locator('#save-settings').click();
+    await page.locator('#notice').filter({hasText:'所有設定已儲存'}).waitFor();
     await page.locator('#teacher-tabs [data-view="questions"]').click();
     const configure=async(q,type,bet)=>{
       const box=page.locator(`.question-config-unit[data-unit="${q}"]`);
@@ -18,7 +18,7 @@ async (page) => {
       if(type==='choice') {
         await box.locator('.choice-options').fill('甲\n乙\n丙'); await box.locator('.choice-correct').selectOption('1');
       }
-      await box.locator('.betting-enabled').setChecked(bet); await box.locator('button').click();
+      await box.locator('.betting-enabled').setChecked(bet); await page.locator('#save-settings').click();
       await box.locator('form[data-dirty="false"]').waitFor();
     };
     await page.locator('.question-type').first().selectOption('choice'); await page.locator('#start').click();
