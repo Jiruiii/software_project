@@ -7,6 +7,7 @@ let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", la
 const pendingAnswers = new Set();
 let sheetPreview = null, lastGoogleCheck = 0;
 let teacherView = 'settings', teacherViewKey = '', savingSettings = false, monitorKey = '', monitorFollow = true;
+let clusterBusy = false, clusterUndo = null, clusterRequest = 0;
 try { auth = JSON.parse(sessionStorage.getItem("classroom.auth")); activityId = sessionStorage.getItem("classroom.activity"); } catch { sessionStorage.clear(); }
 
 function el(tag, text, cls) {
@@ -45,6 +46,7 @@ function showView() {
   $("back").hidden = auth?.role !== "teacher";
 }
 function saveAuth(value) {
+  resetClusterReview();
   resetReplay();
   for (const key of Object.keys(sessionStorage)) if (key.startsWith('classroom.draft.')) sessionStorage.removeItem(key);
   generation++;
@@ -59,6 +61,7 @@ function saveAuth(value) {
   showView(); connection(true);
 }
 function selectActivity(id) {
+  resetClusterReview();
   resetReplay();
   generation++; activityId = id; current = null; cardsKey = lastMonitor = lastResults = "";
   teacherViewKey = ''; monitorKey = '';
@@ -372,6 +375,7 @@ function renderState(state) {
     $("classification").dataset.activity = state.id; $("cluster-list").replaceChildren(); $("cluster-limit").textContent = '';
     $("cluster-question").replaceChildren(...state.questions.map(q=>{const option=el('option',`第 ${q} 題`); option.value=q; return option;}));
   }
+  updateClusterControls();
   $("session-title").textContent = state.title;
   $("session-code").textContent = state.code;
   $("session-subtitle").textContent = teacher ? `${state.questions.length} 道題目 · ${state.groups.length} 個小組已加入` : `${state.group_name} · ${state.questions.length} 道題目，一起完成`;
@@ -472,18 +476,94 @@ function renderReport(state) {
     $('report-table').replaceChildren(table);
   }
 }
-$("cluster-refresh").onclick = () => action($("cluster-refresh"), async () => {
+function resetClusterReview() {
+  clusterRequest++; clusterUndo = null;
+  $('cluster-undo-area').hidden = true;
+  $('cluster-feedback').hidden = true;
+  $('cluster-list').replaceChildren();
+}
+function updateClusterControls() {
+  const reviewable = current?.reviewable_questions?.includes($('cluster-question').value);
+  $('cluster-refresh').disabled = clusterBusy;
+  $('cluster-question').disabled = clusterBusy;
+  $('cluster-undo').disabled = clusterBusy;
+  for (const section of $('cluster-list').children) {
+    section.querySelector('fieldset').disabled = clusterBusy;
+    const boxes = [...section.querySelectorAll('.cluster-choice')];
+    const count = boxes.filter(b=>b.checked).length;
+    const all = section.querySelector('.cluster-all');
+    all.checked = count === boxes.length && count > 0;
+    all.indeterminate = count > 0 && count < boxes.length;
+    for (const button of section.querySelectorAll('[data-verdict]')) {
+      button.textContent = `將勾選答案判為${button.dataset.verdict === 'correct' ? '答對' : '答錯'}（${count} 組）`;
+      button.disabled = clusterBusy || !count || !reviewable;
+    }
+    section.querySelector('.cluster-review-hint').hidden = !!reviewable;
+  }
+}
+async function clusterOperation(fn) {
+  if (clusterBusy) return;
+  clusterBusy = true; updateClusterControls(); notice('');
+  $('cluster-feedback').hidden = true;
+  try { await fn(); }
+  catch (error) {
+    $('cluster-feedback').textContent=error.message; $('cluster-feedback').hidden=false;
+    notice(error.message); if (error.network) connection(false);
+  }
+  finally { clusterBusy = false; updateClusterControls(); }
+}
+async function loadClusters() {
   const id = activityId, question = $("cluster-question").value;
+  const request = ++clusterRequest, session = generation;
   const result = await api(`/api/activities/${id}/clusters`, {question});
-  if (activityId !== id || $("cluster-question").value !== question) return;
-  $("cluster-limit").textContent = result.limited ? '已超過 200 類，後續答案僅比較相同文字。' : '已更新目前答案分類。';
+  if (generation !== session || request !== clusterRequest || activityId !== id || $("cluster-question").value !== question) return;
+  $("cluster-limit").textContent = !result.clusters.length ? '這題目前還沒有答案。' : result.limited ? '已超過 200 類，後續答案僅比較相同文字。' : '已更新目前答案分類。';
   $("cluster-list").replaceChildren(...result.clusters.map((cluster,i) => {
-    const section = el('section'), list = el('ul'); section.append(el('h4',`分類 ${i+1} · ${cluster.answers.length} 組`));
-    for (const answer of cluster.answers) list.append(el('li',`${answer.group_name}：${answer.text}`));
-    section.append(list); return section;
+    const section = el('section',undefined,'cluster-card'), fields=el('fieldset');
+    fields.append(el('legend',`分類 ${i+1} · ${cluster.answers.length} 組`));
+    fields.append(el('p',cluster.exact ? '原文相同 · 已預先勾選' : '文字相似 · 請逐筆確認後勾選','field-hint'));
+    const allLabel=el('label',undefined,'check-label'), all=el('input',undefined,'cluster-all'); all.type='checkbox';
+    allLabel.append(all,document.createTextNode('勾選此分類全部答案')); fields.append(allLabel);
+    const choices=[];
+    for (const answer of cluster.answers) {
+      const label=el('label',undefined,'cluster-answer'), box=el('input',undefined,'cluster-choice'), content=el('span',undefined,'cluster-answer-content');
+      box.type='checkbox'; box.checked=cluster.exact; box.setAttribute('aria-label',`選取 ${answer.group_name} 的答案`);
+      content.append(el('strong',answer.group_name),el('span',`目前：${verdictNames[answer.verdict]}`,'cluster-verdict'),el('span',answer.text,'cluster-answer-text'));
+      label.append(box,content); fields.append(label); choices.push({box,answer});
+      box.onchange=updateClusterControls;
+    }
+    all.onchange=()=>{for(const c of choices) c.box.checked=all.checked; updateClusterControls();};
+    const actions=el('div',undefined,'cluster-actions');
+    for(const verdict of ['correct','incorrect']) {
+      const button=el('button',undefined,verdict==='correct'?'primary':'secondary'); button.type='button'; button.dataset.verdict=verdict;
+      button.onclick=()=>clusterOperation(async()=>{
+        const selections=choices.filter(c=>c.box.checked).map(c=>({id:c.answer.id,revision:c.answer.review_revision}));
+        if(!selections.length) return;
+        const saved=await api(`/api/activities/${id}/review-batch`,{question,selections,verdict});
+        if(generation!==session || activityId!==id) return;
+        clusterUndo={id,batch_id:saved.batch_id};
+        $('cluster-undo-status').textContent=`第 ${question} 題：已將 ${saved.count} 組判為${verdict==='correct'?'答對':'答錯'}。`;
+        $('cluster-undo-area').hidden=false;
+        await refresh(); await loadClusters();
+      });
+      actions.append(button);
+    }
+    fields.append(actions,el('p','請先關閉此題或結束活動，再批改答案。','cluster-review-hint field-hint'));
+    section.append(fields); return section;
   }));
+  updateClusterControls();
+}
+$("cluster-refresh").onclick = () => clusterOperation(loadClusters);
+$('cluster-undo').onclick = () => clusterOperation(async()=>{
+  const undo=clusterUndo, session=generation;
+  if(!undo || undo.id!==activityId) return;
+  const result=await api(`/api/activities/${undo.id}/review-undo`,{batch_id:undo.batch_id});
+  if(generation!==session || activityId!==undo.id) return;
+  clusterUndo=null; $('cluster-undo-area').hidden=true;
+  notice(`已撤銷 ${result.count} 組的批改，還原原本判定與分數。`,true);
+  await refresh(); await loadClusters();
 });
-$("cluster-question").onchange = () => {$("cluster-list").replaceChildren(); $("cluster-limit").textContent='請按比較目前答案。';};
+$("cluster-question").onchange = () => {clusterRequest++; $("cluster-list").replaceChildren(); $("cluster-limit").textContent='請按比較目前答案。';};
 function renderQuestionSettings(state) {
   const panel=$('question-settings'); panel.hidden=state.role!=='teacher' || state.phase!=='preparing';
   if (panel.hidden || panel.dataset.activity===state.id) return;

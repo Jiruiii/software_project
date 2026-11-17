@@ -1,0 +1,85 @@
+async (page) => {
+  const check=(ok,message)=>{if(!ok) throw new Error(message);};
+  const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+  const base=new URL(page.url()).origin;
+  await page.setViewportSize({width:1365,height:1000});
+  await page.locator('#choose-teacher').click();
+  await page.locator('#teacher-password').fill('extras-test-only');
+  await page.locator('#login-form button').click();
+  await page.locator('#activity-title').fill('相似答案批次批改驗收');
+  await page.locator('#question-count').fill('2');
+  await page.locator('#create-form button').click();
+  await page.locator('#settings-form').waitFor({state:'visible'});
+  const session=await page.evaluate(()=>({auth:JSON.parse(sessionStorage.getItem('classroom.auth')),id:sessionStorage.getItem('classroom.activity')}));
+  const path=`/api/activities/${session.id}`;
+  const post=async(route,data,token=session.auth.token)=>{
+    const r=await page.request.post(base+route,{data,headers:{Authorization:'Bearer '+token}});
+    check(r.ok(),`HTTP ${r.status()}: ${await r.text()}`); return r.json();
+  };
+  const state=async()=>{const r=await page.request.get(base+path,{headers:{Authorization:'Bearer '+session.auth.token}});return r.json();};
+  const code=await page.locator('#session-code').innerText();
+  const students=[];
+  for(const group of ['第一組','第二組','第三組']) students.push((await post('/api/join',{code,group})).token);
+  await page.locator('#start').click();
+  await page.locator('#teacher-tabs [data-view="tools"]').waitFor({state:'visible'});
+  for(let i=0;i<3;i++) {
+    await post(path+'/answers',{question:'1',answer:i===2?'我認為這個答案不正確':'我認為這個答案正確',stake:i+1},students[i]);
+    await post(path+'/answers',{question:'2',answer:i===2?'另一種不同答案':'相同答案',stake:i+1},students[i]);
+  }
+  await page.locator('#teacher-tabs [data-view="tools"]').click();
+  await page.locator('#tool-classification > summary').click();
+  const compare=async()=>{await page.locator('#cluster-refresh').click();await page.waitForFunction(()=>!document.querySelector('#cluster-refresh').disabled);};
+  await compare();
+  check(await page.locator('.cluster-choice:checked').count()===0,'Similar text must not be preselected');
+  await page.locator('.cluster-all').first().check();
+  check(await page.locator('#cluster-list [data-verdict="correct"]').first().isDisabled(),'Open question allowed grading');
+  await page.locator('#end').click();
+  await page.locator('#teacher-tabs [data-view="tools"]').click();
+  await page.locator('#classification').waitFor({state:'visible'});
+  await compare();
+  const choices=page.locator('.cluster-choice');
+  await choices.nth(0).check(); await choices.nth(1).check();
+  // Wait for an actual polling cycle and assert that selections survived it.
+  await page.waitForResponse(r=>r.url()===base+path && r.request().method()==='GET');
+  check(await page.locator('.cluster-choice:checked').count()===2,'Polling erased selections');
+  const correct=page.locator('#cluster-list [data-verdict="correct"]').first();
+  check((await correct.innerText()).includes('2 組'),'Incorrect selected count');
+  await page.evaluate(()=>window.scrollTo(0,0));
+  await page.screenshot({path:'output/playwright/batch-review-desktop.png',fullPage:true});
+  await correct.click();
+  await page.locator('#cluster-undo-area').waitFor({state:'visible'});
+  await page.waitForFunction(()=>!document.querySelector('#cluster-refresh').disabled);
+  let snapshot=await state();
+  check(snapshot.answers.filter(a=>a.question_id==='1').map(a=>a.verdict).join() === 'correct,correct,pending','Subset grading wrong');
+  check(snapshot.scoreboard.find(g=>g.group_name==='第二組').score===2,'Score not updated');
+  await page.locator('#cluster-undo').click();
+  await page.locator('#cluster-undo-area').waitFor({state:'hidden'});
+  await page.waitForFunction(()=>!document.querySelector('#cluster-refresh').disabled);
+  check((await state()).scoreboard.every(g=>g.score===0),'Undo did not restore scores');
+  await page.locator('#cluster-question').selectOption('2'); await compare();
+  check(await page.locator('.cluster-card').first().locator('.cluster-choice:checked').count()===2,'Exact answers not preselected');
+  await page.locator('.cluster-card').first().locator('.cluster-all').uncheck();
+  check(await page.locator('#cluster-list [data-verdict="correct"]').first().isDisabled(),'Empty selection enabled');
+  await page.locator('.cluster-card').first().locator('.cluster-all').check();
+  await page.locator('#cluster-list [data-verdict="incorrect"]').first().click();
+  await page.locator('#cluster-undo-area').waitFor({state:'visible'});
+  await page.waitForFunction(()=>!document.querySelector('#cluster-refresh').disabled);
+  snapshot=await state();
+  check(snapshot.scoreboard.find(g=>g.group_name==='第二組').score===-2,'Incorrect grading points wrong');
+  // An intervening review blocks undo of the entire batch.
+  const answer=snapshot.answers.find(a=>a.question_id==='2');
+  await post(path+'/review',{answer_id:answer.id,verdict:'correct'});
+  await page.locator('#cluster-list [data-verdict="incorrect"]').first().click();
+  await page.locator('#cluster-feedback').filter({hasText:'請重新比較'}).waitFor();
+  check((await state()).answers.find(a=>a.id===answer.id).verdict==='correct','Stale batch overwrote newer verdict');
+  await page.locator('#cluster-undo').click();
+  await page.locator('#notice').filter({hasText:'已有後續批改'}).waitFor();
+  check((await state()).answers.find(a=>a.id===answer.id).verdict==='correct','Undo overwrote newer verdict');
+  await compare();
+  await page.setViewportSize({width:390,height:844});
+  await page.locator('#classification').scrollIntoViewIfNeeded();
+  await page.screenshot({path:'output/playwright/batch-review-mobile.png',fullPage:true});
+  check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
+  check(!errors.length,errors.join('\n'));
+  return {passed:true,checks:['similar-unselected','exact-preselected','open-question-disabled','selection-survives-poll','subset-grading','score-update','undo','empty-disabled','stale-batch-rejected','conflicting-undo','mobile-layout'],pageErrors:errors};
+}

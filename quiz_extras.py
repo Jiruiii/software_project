@@ -3,6 +3,7 @@ import csv
 from datetime import datetime, timezone
 import io
 import json
+import secrets
 import time
 import unicodedata
 from difflib import SequenceMatcher
@@ -144,11 +145,17 @@ class ExtraFeatures:
             if index is None:
                 index = len(clusters); clusters.append({"normalized":normalized, "answers":[]})
             exact[normalized] = index
-            clusters[index]["answers"].append({k:answer[k] for k in ("group_name", "text")})
-        return {"clusters":clusters, "threshold":.85, "limited":limited}
+            clusters[index]["answers"].append({k:answer[k] for k in ("id", "group_name", "text", "verdict", "review_revision")})
+        for cluster in clusters:
+            cluster["exact"] = len({a["text"] for a in cluster["answers"]}) == 1
+        return {"clusters":clusters, "threshold":.85, "limited":limited,
+                "reviewable":question in state["reviewable_questions"]}
 
     def _init_extras(self):
         self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS review_batches (
+                id TEXT PRIMARY KEY, activity_id TEXT NOT NULL REFERENCES activities(id),
+                owner TEXT NOT NULL, changes_json TEXT NOT NULL, undone INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS activity_options (
                 activity_id TEXT PRIMARY KEY REFERENCES activities(id),
                 mode TEXT NOT NULL DEFAULT 'all', fairness INTEGER NOT NULL DEFAULT 0,
@@ -172,6 +179,8 @@ class ExtraFeatures:
             self.db.execute("ALTER TABLE answers ADD COLUMN stake INTEGER NOT NULL DEFAULT 1")
         if "verdict" not in columns:
             self.db.execute("ALTER TABLE answers ADD COLUMN verdict TEXT NOT NULL DEFAULT 'pending'")
+        if "review_revision" not in columns:
+            self.db.execute("ALTER TABLE answers ADD COLUMN review_revision INTEGER NOT NULL DEFAULT 0")
         columns = {r['name'] for r in self.db.execute('PRAGMA table_info(question_meta)')}
         for name, definition in [('question_type', "TEXT NOT NULL DEFAULT 'short'"),
                                  ('options_json', "TEXT NOT NULL DEFAULT '[]'"),
@@ -258,9 +267,67 @@ class ExtraFeatures:
             if not self._reviewable(activity, answer["question_id"]):
                 raise QuizError(409, "請先關閉此題或結束活動，再判定答案。")
             if answer["verdict"] != verdict:
-                self.db.execute("UPDATE answers SET verdict=? WHERE id=?", (verdict, answer_id))
                 self.db.execute("UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?", (aid,))
+            self.db.execute("UPDATE answers SET verdict=?,review_revision=review_revision+1 WHERE id=?", (verdict, answer_id))
             return {"ok": True}
+
+    @expire_first
+    def review_batch(self, token, aid, question, selections, verdict):
+        from quiz_service import QuizError
+        with self.lock, self.db:
+            owner = self._auth(token, "teacher")["token_hash"]
+            activity = self._activity(aid)
+            if not isinstance(question, str) or verdict not in ("correct", "incorrect"):
+                raise QuizError(400, "請提供有效題號與判定。")
+            if not isinstance(selections, list) or not 1 <= len(selections) <= 1000:
+                raise QuizError(400, "請勾選 1～1000 筆答案。")
+            if any(not isinstance(s, dict) or type(s.get("id")) is not int or
+                   type(s.get("revision")) is not int or s["revision"] < 0 for s in selections):
+                raise QuizError(400, "答案清單格式錯誤，請重新比較。")
+            if len({s["id"] for s in selections}) != len(selections):
+                raise QuizError(400, "答案清單不能重複。")
+            if not self._reviewable(activity, question):
+                raise QuizError(409, "請先關閉此題或結束活動，再判定答案。")
+            changes = []
+            for selection in selections:
+                answer = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND question_id=? AND id=?",
+                                         (aid, question, selection["id"])).fetchone()
+                if not answer: raise QuizError(404, "答案不屬於此活動與題目。")
+                if answer["review_revision"] != selection["revision"]:
+                    raise QuizError(409, "部分答案已被批改；本次未變更任何答案，請重新比較。")
+                changes.append({"id":answer["id"], "before":answer["verdict"],
+                                "revision":answer["review_revision"] + 1})
+            self.db.executemany("UPDATE answers SET verdict=?,review_revision=? WHERE id=?",
+                                [(verdict, c["revision"], c["id"]) for c in changes])
+            batch_id = secrets.token_hex(16)
+            self.db.execute("INSERT INTO review_batches(id,activity_id,owner,changes_json) VALUES(?,?,?,?)",
+                            (batch_id, aid, owner, json.dumps(changes)))
+            self.db.execute("UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?", (aid,))
+            return {"batch_id":batch_id, "count":len(changes)}
+
+    @expire_first
+    def undo_review_batch(self, token, aid, batch_id):
+        from quiz_service import QuizError
+        with self.lock, self.db:
+            owner = self._auth(token, "teacher")["token_hash"]
+            activity = self._activity(aid)
+            if not isinstance(batch_id, str): raise QuizError(400, "請提供批改紀錄。")
+            batch = self.db.execute("SELECT * FROM review_batches WHERE id=? AND activity_id=? AND owner=?",
+                                    (batch_id, aid, owner)).fetchone()
+            if not batch: raise QuizError(404, "找不到可撤銷的批改紀錄。")
+            if batch["undone"]: raise QuizError(409, "此批次已撤銷。")
+            changes = json.loads(batch["changes_json"])
+            for change in changes:
+                answer = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND id=?", (aid, change["id"])).fetchone()
+                if not answer or answer["review_revision"] != change["revision"]:
+                    raise QuizError(409, "部分答案已有後續批改，無法撤銷；本次未變更任何答案。")
+                if not self._reviewable(activity, answer["question_id"]):
+                    raise QuizError(409, "此題目前不能批改。")
+            self.db.executemany("UPDATE answers SET verdict=?,review_revision=review_revision+1 WHERE id=?",
+                                [(c["before"], c["id"]) for c in changes])
+            self.db.execute("UPDATE review_batches SET undone=1 WHERE id=?", (batch_id,))
+            self.db.execute("UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?", (aid,))
+            return {"ok":True, "count":len(changes)}
 
     def _new_options(self, aid):
         self.db.execute("INSERT INTO activity_options(activity_id) VALUES(?)", (aid,))

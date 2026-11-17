@@ -124,7 +124,7 @@ async (page) => {
   stage='line 64';
   await page.locator('#teacher-tabs [data-view="tools"]').click(); await page.locator('#tool-classification > summary').click(); await page.locator('#cluster-refresh').click();
   stage='line 65';
-  await page.waitForFunction(()=>document.querySelector('#cluster-list').textContent.includes('驗收A組：測試答案'));
+  await page.waitForFunction(()=>[...document.querySelectorAll('.cluster-answer')].some(row=>row.textContent.includes('驗收A組') && row.textContent.includes('測試答案')));
   stage='line 66';
   check(await student.locator('#classification').isHidden(),'student clusters exposed');
   stage='line 67';

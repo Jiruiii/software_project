@@ -19,7 +19,7 @@ from guided_notes import from_xlsx, parse_grid
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui'],default='extras')
+    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui','batch-review'],default='extras')
     suite=parser.parse_args().suite
     output = ROOT/"output/playwright"; output.mkdir(parents=True, exist_ok=True)
     service = QuizService(":memory:", "extras-test-only")

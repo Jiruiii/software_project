@@ -119,8 +119,12 @@
           <div id="teacher-monitor" hidden><div class="monitor-toolbar"><div id="monitor-summary" class="monitor-summary"></div><div><label for="monitor-question">查看題目</label><select id="monitor-question"><option value="">全部題目</option></select></div></div><p class="field-hint">關閉題目後可批改；請勿將這個畫面投影給學生。</p><div id="monitor-table" class="table-scroll"></div></div>
           <section id="classification" class="panel" hidden><h3>答案歸類</h3>
             <p class="field-hint">忽略全半形、大小寫與多餘空白；相似度達 85% 歸為一類。文字相近，不代表同義或正確。</p>
+            <p class="field-hint">原文完全相同的分類會預先勾選；其他分類請先閱讀並勾選。關閉題目後即可批次批改。</p>
             <label for="cluster-question">選擇題號</label><select id="cluster-question"></select><button id="cluster-refresh" class="primary">比較目前答案</button>
-            <p id="cluster-limit"></p><div id="cluster-list"></div>
+            <p id="cluster-limit" aria-live="polite"></p>
+            <p id="cluster-feedback" role="status" hidden></p>
+            <div id="cluster-undo-area" class="cluster-undo" hidden><span id="cluster-undo-status" aria-live="polite"></span><button id="cluster-undo" class="secondary">撤銷上次批改</button></div>
+            <div id="cluster-list"></div>
           </section>
         </div>
       </div>

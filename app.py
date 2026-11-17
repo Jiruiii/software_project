@@ -111,7 +111,7 @@ def make_server(service, port=8000, sheets=None):
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
                     return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv|settings|round|review|clusters|reference|report|bundle|question-settings))?", path)
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|csv|settings|round|review|review-batch|review-undo|clusters|reference|report|bundle|question-settings))?", path)
             if match:
                 aid, action = match.groups()
                 if self.command == 'POST' and action == 'question-settings':
@@ -126,6 +126,10 @@ def make_server(service, port=8000, sheets=None):
                     return self.respond(200, service.clusters(token, aid, data.get("question")))
                 if self.command == "POST" and action == "review":
                     return self.respond(200, service.review(token, aid, data.get("answer_id"), data.get("verdict")))
+                if self.command == "POST" and action == "review-batch":
+                    return self.respond(200, service.review_batch(token, aid, data.get("question"), data.get("selections"), data.get("verdict")))
+                if self.command == "POST" and action == "review-undo":
+                    return self.respond(200, service.undo_review_batch(token, aid, data.get("batch_id")))
                 if self.command == "POST" and action == "settings":
                     return self.respond(200, service.configure(token, aid, data.get("mode"), data.get("fairness", False), data.get("duration_seconds", 0)))
                 if self.command == "POST" and action == "round":
