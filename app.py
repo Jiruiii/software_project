@@ -170,8 +170,8 @@ def main():
     parser.add_argument("--db", type=Path, default=ROOT / "data" / "classroom.sqlite3")
     args = parser.parse_args()
     password = os.environ.get("QUIZ_TEACHER_PASSWORD") or getpass.getpass("設定本次教師登入密碼（輸入不顯示）: ")
-    if len(password) < 8:
-        parser.error("教師密碼至少需要 8 個字元。")
+    if not password:
+        parser.error("教師密碼不可空白。")
     service = QuizService(args.db, password)
     try:
         server = make_server(service, args.port)
