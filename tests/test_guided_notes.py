@@ -52,6 +52,9 @@ class GuidedNotesTests(unittest.TestCase):
         # A different column order, unrelated to the official coordinates.
         alternate = Grid("別版", {(2,8):"題號", (2,6):"題目", (2,1):"答案", (4,8):"A", (4,6):"問題"}, [])
         self.assertEqual("B5", parse_grid(alternate)["targets"][0]["cell"])
+        self.assertEqual('問題', parse_grid(alternate)['targets'][0]['prompt'])
+        alternate.cells[(4,1)] = '{{Q:A}}'
+        self.assertEqual('問題', parse_grid(alternate)['targets'][0]['prompt'])
 
     def test_invalid_layouts_do_not_silently_drop_questions(self):
         g = single(); g.cells[(6,1)] = "1"

@@ -28,6 +28,7 @@ class QuizService(ExtraFeatures):
             raise ValueError("教師密碼不可空白")
         self.password_hash = hashlib.sha256(teacher_password.encode()).digest()
         self.lock = threading.RLock()
+        self.courses = None
         self.login_attempts = {}
         self.sheet_sync_states = {}
         if str(database) != ":memory:":
@@ -61,6 +62,16 @@ class QuizService(ExtraFeatures):
             CREATE TABLE IF NOT EXISTS sheet_sources (
                 activity_id TEXT PRIMARY KEY REFERENCES activities(id), source_json TEXT NOT NULL,
                 exported_at REAL);
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY, activity_id TEXT NOT NULL REFERENCES activities(id),
+                group_id TEXT NOT NULL REFERENCES groups(id), request_id TEXT NOT NULL, body TEXT NOT NULL,
+                UNIQUE(activity_id, group_id, request_id));
+            CREATE INDEX IF NOT EXISTS chat_activity_order ON chat_messages(activity_id,id);
+            CREATE TRIGGER IF NOT EXISTS clear_finished_chat AFTER UPDATE OF phase ON activities
+            WHEN NEW.phase='results' AND OLD.phase<>NEW.phase
+            BEGIN
+                DELETE FROM chat_messages WHERE activity_id=NEW.id;
+            END;
         """)
         self._init_extras()
 
@@ -80,8 +91,8 @@ class QuizService(ExtraFeatures):
     def create_from_source(self, token, title, source):
         with self.lock, self.db:
             result = self.create(token, title, [t["question"] for t in source["targets"]], _commit=False)
-            self.db.executemany("UPDATE question_meta SET unit_id=? WHERE activity_id=? AND question_id=?",
-                                [(t.get("unit",t["question"]),result["id"],t["question"]) for t in source["targets"]])
+            self.db.executemany("UPDATE question_meta SET unit_id=?, prompt=? WHERE activity_id=? AND question_id=?",
+                                [(t.get("unit",t["question"]),t.get("prompt", ""),result["id"],t["question"]) for t in source["targets"]])
             self.db.execute("INSERT INTO sheet_sources(activity_id,source_json) VALUES(?,?)",
                             (result["id"],json.dumps(source,ensure_ascii=False)))
             return result
@@ -150,9 +161,56 @@ class QuizService(ExtraFeatures):
             raise QuizError(401, "登入已失效，請重新進入。")
         if role and row["role"] != role:
             raise QuizError(403, "此操作需要教師或指定角色權限。")
+        if self.courses:
+            scope = self.courses.scope(token)
+            if activity_id:
+                self.courses.access(scope, activity_id)
         if activity_id and row["role"] == "student" and row["activity_id"] != activity_id:
             raise QuizError(403, "無法存取其他活動。")
         return row
+
+    def chat_student(self, session):
+        return session["role"] == "student" and (
+            not self.courses or self.courses.student_workspace_session(session["token_hash"])
+        )
+
+    def _chat_access(self, token, aid):
+        session = self._auth(token, "student", aid)
+        if not self.chat_student(session):
+            raise QuizError(403, "公用頻道僅開放給本場學生。")
+        if self._activity(aid)["phase"] != "active":
+            raise QuizError(409, "公用頻道只在搶答進行中開放。")
+        return session["group_id"]
+
+    @expire_first
+    def chat_messages(self, token, aid, after):
+        with self.lock:
+            self._chat_access(token, aid)
+            if not isinstance(after, str) or not after.isascii() or not after.isdecimal() or len(after) > 19 or int(after) > 2**63-1:
+                raise QuizError(400, "訊息位置無效。")
+            rows = self.db.execute(
+                "SELECT m.id,g.name AS group_name,m.body FROM chat_messages m JOIN groups g ON g.id=m.group_id "
+                "WHERE m.activity_id=? AND m.id>? ORDER BY m.id LIMIT 100", (aid, int(after)),
+            )
+            return {"messages": [dict(row) for row in rows]}
+
+    @expire_first
+    def post_chat(self, token, aid, body, request_id):
+        with self.lock, self.db:
+            gid = self._chat_access(token, aid)
+            body = text(body, "訊息", 500)
+            request_id = text(request_id, "發言識別碼", 64)
+            key = (aid, gid, request_id)
+            self.db.execute(
+                "INSERT INTO chat_messages(activity_id,group_id,request_id,body) VALUES(?,?,?,?) "
+                "ON CONFLICT(activity_id,group_id,request_id) DO NOTHING", (*key, body),
+            )
+            saved = self.db.execute(
+                "SELECT id,body FROM chat_messages WHERE activity_id=? AND group_id=? AND request_id=?", key,
+            ).fetchone()
+            if saved["body"] != body:
+                raise QuizError(409, "這次發言已送出。")
+            return {"id": saved["id"]}
 
     def login(self, password, client="local"):
         with self.lock, self.db:
@@ -193,6 +251,11 @@ class QuizService(ExtraFeatures):
             self.db.executemany("INSERT INTO questions VALUES(?,?,?)",
                                 [(aid, q, i) for i, q in enumerate(questions)])
             self._new_options(aid)
+            if self.courses:
+                scope = self.courses.scope(token)
+                if scope['kind'] != 'owner':
+                    raise QuizError(403, '只有課程老師可建立活動。')
+                self.db.execute('INSERT INTO lessons VALUES(?,?)', (aid, scope['course']))
             return {"id": aid, "code": code}
 
     def join(self, code, group):
@@ -213,6 +276,8 @@ class QuizService(ExtraFeatures):
     def activities(self, token):
         with self.lock:
             self._auth(token, "teacher")
+            if self.courses:
+                return self.courses.rows('SELECT a.* FROM activities a JOIN lessons l ON l.aid=a.id WHERE l.course=? ORDER BY created_at DESC', self.courses.scope(token)['course'])
             return [dict(r) for r in self.db.execute("SELECT * FROM activities ORDER BY created_at DESC")]
 
     def _activity(self, aid):
@@ -261,7 +326,7 @@ class QuizService(ExtraFeatures):
             activity = self._activity(aid)
             if activity["phase"] != "active":
                 raise QuizError(409, "目前不在作答階段，答案未送出。")
-            question, answer = text(question, "題號", 40), text(answer, "答案", 2000)
+            question = text(question, "題號", 40)
             if type(stake) is not int or not 0 <= stake <= 3:
                 raise QuizError(400, "下注必須是 0～3 的整數；0 表示不押。")
             received = time.time() if _received is None else _received
@@ -271,7 +336,7 @@ class QuizService(ExtraFeatures):
             if not self.db.execute("SELECT 1 FROM questions WHERE activity_id=? AND id=?",
                                    (aid, question)).fetchone():
                 raise QuizError(404, "題號不存在。")
-            verdict = self._answer_verdict(aid, question, answer, stake)
+            answer, verdict = self._grade_submission(aid, question, answer, stake)
             previous = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND question_id=? AND group_id=?",
                                        (aid, question, session["group_id"])).fetchone()
             if previous:
@@ -283,7 +348,20 @@ class QuizService(ExtraFeatures):
             elapsed = max(0, round((received - (opened if opened is not None else activity["started_at"])) * 1000))
             cursor = self.db.execute("INSERT INTO answers(activity_id,question_id,group_id,text,received_at,elapsed_ms,elapsed_basis,stake,verdict) VALUES(?,?,?,?,?,?,?,?,?)",
                                      (aid, question, session["group_id"], answer, received, elapsed, basis, stake, verdict))
+            if self.courses:
+                self.db.execute('INSERT INTO submitters VALUES(?,?)', (cursor.lastrowid, self.courses.scope(token)['uid']))
             return self._own_answer(self.db.execute("SELECT * FROM answers WHERE id=?", (cursor.lastrowid,)).fetchone(), activity)
+
+    def _teacher_answers(self, aid):
+        rows = [dict(r) for r in self.db.execute(
+            "SELECT a.*,g.name AS group_name FROM answers a JOIN groups g ON g.id=a.group_id WHERE a.activity_id=? ORDER BY a.id", (aid,))]
+        if self.courses:
+            answers = {a['id']: a for a in rows}
+            for row in self.courses.rows('SELECT s.answer,p.email FROM submitters s JOIN people p ON p.uid=s.uid JOIN answers a ON a.id=s.answer WHERE a.activity_id=?', aid):
+                answers[row['answer']]['author'] = row['email']
+            for row in self.courses.rows('SELECT g.*,p.email FROM grade_log g JOIN people p ON p.uid=g.uid JOIN answers a ON a.id=g.answer WHERE a.activity_id=? ORDER BY revision', aid):
+                answers[row['answer']].setdefault('reviews', []).append(row)
+        return rows
 
     @expire_first
     def snapshot(self, token, aid):
@@ -302,8 +380,7 @@ class QuizService(ExtraFeatures):
                     activity["source"]["sync"] = self.sheet_sync_states.get(aid, {'state':'idle', 'message':'連線 Google 後，關題會自動同步學習單。'})
                 activity["groups"] = [dict(r) for r in self.db.execute(
                     "SELECT id,name FROM groups WHERE activity_id=? ORDER BY name", (aid,))]
-                activity["answers"] = [dict(r) for r in self.db.execute(
-                    "SELECT a.*,g.name AS group_name FROM answers a JOIN groups g ON g.id=a.group_id WHERE a.activity_id=? ORDER BY a.id", (aid,))]
+                activity["answers"] = self._teacher_answers(aid)
             else:
                 group = self.db.execute("SELECT name FROM groups WHERE id=?", (session["group_id"],)).fetchone()
                 activity["group_name"] = group["name"]

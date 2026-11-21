@@ -33,7 +33,7 @@ async (page) => {
   await student.locator('#activity').waitFor({state:'visible'});
   check(await student.locator('.question-card').count()===6,'student count mismatch');
   check(await student.locator('#sheet-export-controls').isHidden(),'student can see source');
-  await page.locator('#start').click(); await page.locator('#end').waitFor({state:'visible'}); await page.locator('#end').click();
+  await page.locator('#start').click(); await page.locator('#end').waitFor({state:'visible'}); await page.locator('#end').click(); await page.locator('#confirm-end').click();
   await page.locator('#sheet-export').waitFor({state:'visible'}); await page.locator('#sheet-export').click();
   await page.locator('#notice').filter({hasText:'官方範本僅供讀取'}).waitFor();
   await page.screenshot({path:'output/playwright/sheets-results.png',fullPage:true});

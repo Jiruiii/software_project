@@ -33,7 +33,7 @@ async (page) => {
   check(await page.locator('.cluster-choice:checked').count()===0,'Similar text must not be preselected');
   await page.locator('.cluster-all').first().check();
   check(await page.locator('#cluster-list [data-verdict="correct"]').first().isDisabled(),'Open question allowed grading');
-  await page.locator('#end').click();
+  await page.locator('#end').click(); await page.locator('#confirm-end').click();
   await page.locator('#teacher-tabs [data-view="tools"]').click();
   await page.locator('#classification').waitFor({state:'visible'});
   await compare();
@@ -51,7 +51,7 @@ async (page) => {
   await page.waitForFunction(()=>!document.querySelector('#cluster-refresh').disabled);
   let snapshot=await state();
   check(snapshot.answers.filter(a=>a.question_id==='1').map(a=>a.verdict).join() === 'correct,correct,pending','Subset grading wrong');
-  check(snapshot.scoreboard.find(g=>g.group_name==='第二組').score===2,'Score not updated');
+  check(snapshot.scoreboard.find(g=>g.group_name==='第二組').score===4,'Score not updated');
   await page.locator('#cluster-undo').click();
   await page.locator('#cluster-undo-area').waitFor({state:'hidden'});
   await page.waitForFunction(()=>!document.querySelector('#cluster-refresh').disabled);

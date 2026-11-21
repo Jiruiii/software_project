@@ -17,7 +17,7 @@ async (page) => {
     await student.locator('#join-form button').click();
     await student.locator('.answer-time').filter({hasText:'該題開放後 2.350 秒'}).waitFor();
     await student.locator('.answer-time').filter({hasText:'活動開始後（舊紀錄） 3.000 秒'}).waitFor();
-    await page.locator('#end').click();
+    await page.locator('#end').click(); await page.locator('#confirm-end').click();
     await page.locator('#teacher-tabs [data-view="tools"]').click();
     await page.locator('#tool-replay > summary').click();
     await page.locator('#replay-question').selectOption('2');

@@ -1,6 +1,5 @@
 import csv
 import io
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,11 +31,6 @@ class QuestionTimingTests(unittest.TestCase):
         self.clock.return_value = 1001.25
         self.first = self.s.submit(self.u, self.aid, '1', 'first')
         self.s.round_action(self.t, self.aid, 'close')
-        if fairness:
-            gid=self.s.db.execute('SELECT id FROM groups WHERE activity_id=?',(self.aid,)).fetchone()[0]
-            # Seed a legacy checkpoint; this test isolates priority timing.
-            self.s.db.execute('DELETE FROM fairness_rounds WHERE activity_id=?',(self.aid,))
-            self.s.db.execute('UPDATE fairness_baselines SET counts_json=?,legacy=1 WHERE activity_id=?',(json.dumps({gid:3}),self.aid));self.s.db.commit()
         self.clock.return_value = 1060
         self.s.round_action(self.t, self.aid, 'next')
 

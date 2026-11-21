@@ -75,8 +75,9 @@ async (page) => {
       if (!document.querySelector('#results').hidden && !window.qaPhaseTimes.end) window.qaPhaseTimes.end = Date.now();
     }).observe(document.querySelector('#results'), {attributes:true});
   });
-  await page.evaluate(() => document.querySelector('#end').addEventListener('click', () => window.qaEndClick = Date.now(), {once:true}));
+  await page.evaluate(() => document.querySelector('#confirm-end').addEventListener('click', () => window.qaEndClick = Date.now(), {once:true}));
   await page.getByRole('button', {name:'結束搶答並公布結果'}).click();
+  await page.locator('#confirm-end').click();
   await Promise.all([studentA,studentB,groupmate].map(p => p.locator('#results').waitFor({state:'visible',timeout:2000})));
   const ended = await page.evaluate(() => window.qaEndClick);
   const endSyncMs = Math.max(...await Promise.all([studentA,studentB,groupmate].map(p => p.evaluate(() => window.qaPhaseTimes.end)))) - ended;

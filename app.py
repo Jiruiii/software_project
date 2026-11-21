@@ -5,6 +5,7 @@ import html
 import json
 import os
 import re
+import secrets
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,7 +17,10 @@ from sheet_auto_sync import SheetsAutoSync
 ROOT = Path(__file__).resolve().parent
 
 
-def make_server(service, port=8000, sheets=None):
+def make_server(service, port=8000, sheets=None, portal=False):
+    accounts = service.courses
+    if not accounts and service.db.execute("SELECT 1 FROM sqlite_master WHERE name='auth_project'").fetchone():
+        raise ValueError("此資料庫已啟用帳號，請載入原 Firebase 專案設定。")
     sheets = sheets or SheetsWorkflow(service)
     auto_sync = SheetsAutoSync(sheets)
     class Handler(BaseHTTPRequestHandler):
@@ -42,7 +46,13 @@ def make_server(service, port=8000, sheets=None):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+            policy = "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; img-src 'self' data:"
+            if accounts and urlsplit(self.path).path in ('/', '/classroom'):
+                policy += " https://*.googleusercontent.com"
+            if accounts and urlsplit(self.path).path == '/':
+                domain = accounts.config['authDomain']
+                policy += f"; script-src 'self' https://www.gstatic.com https://apis.google.com; frame-src https://{domain}; connect-src 'self' https://*.googleapis.com https://{domain}"
+            self.send_header("Content-Security-Policy", policy)
             self.end_headers()
             self.wfile.write(body)
 
@@ -67,6 +77,17 @@ def make_server(service, port=8000, sheets=None):
                 raise QuizError(403, "不允許跨來源操作。")
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 raise QuizError(403, "不允許跨網站操作。")
+            if self.command == "GET" and (portal or accounts):
+                files = {"/": ("courses.html", "text/html"), "/courses.js": ("courses.js", "text/javascript")}
+                if accounts:
+                    files["/classroom"] = ("index.html", "text/html")
+                if path in files:
+                    file, mime = files[path]
+                    return self.respond(200, (ROOT / "public" / file).read_bytes(), mime + "; charset=utf-8")
+                if path == "/api/firebase-config":
+                    return self.respond(200, accounts.config if accounts else {})
+            if self.command == "GET" and path in ("/workspace.js", "/activity-chat.js", "/share-code.js"):
+                return self.respond(200, (ROOT / "public" / path[1:]).read_bytes(), "text/javascript; charset=utf-8")
             if self.command == "GET" and path in ("/", "/app.js", "/style.css", "/google-setup.html"):
                 file, mime = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css"), "/google-setup.html":("google-setup.html","text/html")}[path]
                 return self.respond(200, (ROOT / "public" / file).read_bytes(), mime + "; charset=utf-8")
@@ -89,6 +110,22 @@ def make_server(service, port=8000, sheets=None):
                     raise QuizError(400, "無效的 JSON 內容。")
                 if not isinstance(data, dict):
                     raise QuizError(400, "送出內容必須是物件。")
+            if accounts and self.command == 'POST' and path.startswith('/api/account/'):
+                return self.respond(200, accounts.dispatch(token, path.removeprefix('/api/account/'), data))
+            if portal or accounts:
+                if not accounts:
+                    raise QuizError(503, "請先設定 Firebase 帳號登入。")
+                if path in ('/api/teacher/login', '/api/join'):
+                    raise QuizError(403, "請從課程首頁使用 Google 帳號登入。")
+                with service.lock:
+                    scope = accounts.scope(token)
+                    target = re.fullmatch(r'/api/activities/([a-f0-9]{24})(?:/([a-z-]+))?', path)
+                    if target:
+                        accounts.access(scope, target[1])
+                    if scope['kind'] == 'assistant' and path != '/api/logout':
+                        if not target or not ((self.command == 'GET' and target[2] is None) or
+                                (self.command == 'POST' and target[2] in ('review','review-batch','review-undo','clusters'))):
+                            raise QuizError(403, "助教僅能查看本課程紀錄與批改。")
             if self.command == "POST" and path == "/api/teacher/login":
                 return self.respond(200, service.login(data.get("password"), self.client_address[0]))
             if self.command == "POST" and path == "/api/join":
@@ -117,9 +154,15 @@ def make_server(service, port=8000, sheets=None):
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
                     return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|sheet-sync|csv|settings|round|review|review-batch|review-undo|clusters|reference|report|bundle|question-settings))?", path)
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|sheet-sync|csv|settings|round|review|review-batch|review-undo|clusters|reference|report|bundle|question-settings|chat))?", path)
             if match:
                 aid, action = match.groups()
+                if action == "chat":
+                    if self.command == "GET":
+                        after = parse_qs(urlsplit(self.path).query).get("after", ["0"])[0]
+                        return self.respond(200, service.chat_messages(token, aid, after))
+                    if self.command == "POST":
+                        return self.respond(200, service.post_chat(token, aid, data.get("body"), data.get("request_id")))
                 if self.command == 'POST' and action == 'question-settings':
                     return self.respond(200, service.question_settings(token, aid, data.get('unit'), data.get('betting_enabled'), data.get('questions')))
                 if self.command == "POST" and action == "bundle":
@@ -131,7 +174,7 @@ def make_server(service, port=8000, sheets=None):
                 if self.command == "POST" and action == "clusters":
                     return self.respond(200, service.clusters(token, aid, data.get("question")))
                 if self.command == "POST" and action == "review":
-                    return self.managed(service.review(token, aid, data.get("answer_id"), data.get("verdict")), token, aid)
+                    return self.managed(service.review(token, aid, data.get("answer_id"), data.get("verdict"), data.get("revision")), token, aid)
                 if self.command == "POST" and action == "review-batch":
                     return self.managed(service.review_batch(token, aid, data.get("question"), data.get("selections"), data.get("verdict")), token, aid)
                 if self.command == "POST" and action == "review-undo":
@@ -187,18 +230,35 @@ def make_server(service, port=8000, sheets=None):
 def main():
     parser = argparse.ArgumentParser(description="課堂搶答系統（本機）")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--legacy", action="store_true", help="以舊版入口開啟尚未綁定 Firebase 的本機資料庫")
+    parser.add_argument("--firebase-config", type=Path, default=ROOT / "credentials" / "firebase.json")
     parser.add_argument("--db", type=Path, default=ROOT / "data" / "classroom.sqlite3")
     args = parser.parse_args()
-    password = os.environ.get("QUIZ_TEACHER_PASSWORD") or getpass.getpass("設定本次教師登入密碼（輸入不顯示）: ")
+    password = secrets.token_urlsafe(32)
+    if args.legacy:
+        password = os.environ.get("QUIZ_TEACHER_PASSWORD") or getpass.getpass("設定本次教師登入密碼（輸入不顯示）: ")
     if not password:
         parser.error("教師密碼不可空白。")
     service = QuizService(args.db, password)
     try:
-        server = make_server(service, args.port)
+        if not args.legacy and args.firebase_config.exists():
+            from course_accounts import Courses
+            from google.oauth2.id_token import verify_firebase_token
+            from google.auth.transport.requests import Request
+            import cryptography
+            config = json.loads(args.firebase_config.read_text(encoding="utf-8-sig"))
+            web = {key: config[key] for key in ('apiKey', 'appId', 'authDomain', 'projectId')}
+            if not all(isinstance(v,str) and v.strip() for v in web.values()) or not re.fullmatch(r'[a-z0-9-]+[.]firebaseapp[.]com', web['authDomain']):
+                raise ValueError("請使用 Firebase Web 應用程式設定中的預設 authDomain。")
+            Courses(service, web, config.get('adminUid'))
+        server = make_server(service, args.port, portal=not args.legacy)
+    except (ValueError, KeyError, ImportError) as error:
+        service.close()
+        parser.error(f"Firebase 設定無法載入。請參閱 docs/firebase.md。{error}")
     except OSError:
         service.close()
         parser.error("連接埠無法使用，請改用 --port 8001，或停止原服務。")
-    print(f"課堂搶答系統 http://127.0.0.1:{server.server_port} （Ctrl+C 停止）", flush=True)
+    print(f"課堂搶答系統 http://localhost:{server.server_port} （Ctrl+C 停止）", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

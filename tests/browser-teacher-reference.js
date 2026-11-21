@@ -5,7 +5,13 @@ async (page) => {
   await page.locator('#choose-teacher').click();
   await page.locator('#teacher-password').fill('extras-test-only');
   await page.locator('#login-form button').click();
-  await page.locator('.activity-card').filter({hasText:'自動同步驗收'}).click();
+  const entry=page.locator('.activity-list-entry').filter({hasText:'自動同步驗收'});
+  const expected=await entry.locator('code').innerText();
+  await page.context().grantPermissions(['clipboard-read','clipboard-write'],{origin:new URL(page.url()).origin});
+  await entry.getByRole('button',{name:'複製活動代碼'}).click();
+  await entry.getByText('已複製').waitFor();
+  check(await page.evaluate(()=>navigator.clipboard.readText())===expected,'Activity list copied wrong code');
+  await entry.locator('.activity-card').click();
   await page.locator('#start').waitFor({state:'visible'});
   const session=await page.evaluate(()=>({token:auth.token,id:activityId}));
   const base=new URL(page.url()).origin,path=`/api/activities/${session.id}`;
@@ -14,6 +20,15 @@ async (page) => {
     check(r.ok(),`HTTP ${r.status()}: ${await r.text()}`);return r.json();
   };
   const code=await page.locator('#session-code').innerText();
+  check(code===expected,'Activity list code differs from opened activity');
+  await page.evaluate(async()=>{
+    await navigator.clipboard.writeText('測試備援複製');
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});
+  });
+  await page.getByRole('button',{name:'複製活動代碼'}).click();
+  await page.locator('#session-code-block').getByText('已複製').waitFor();
+  await page.evaluate(()=>{delete navigator.clipboard;});
+  check(await page.evaluate(()=>navigator.clipboard.readText())===code,'Fallback copy failed');
   const student=(await post('/api/join',{code,group:'測試組'})).token;
   const studentPage=await page.context().newPage();studentPage.on('pageerror',e=>errors.push(String(e)));
   await studentPage.goto(base);
@@ -77,7 +92,7 @@ async (page) => {
   await page.evaluate(()=>window.scrollTo(0,0));
   await page.screenshot({path:'output/playwright/teacher-reference-mobile.png',fullPage:true});
   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile overflow');
-  await page.locator('#end').click();await page.waitForFunction(()=>current.phase==='results');
+  await page.locator('#end').click(); await page.locator('#confirm-end').click();await page.waitForFunction(()=>current.phase==='results');
   check(await page.locator('#references').isVisible(),'Reference hidden in results');
   check(await page.locator('#tool-references').count()===0,'Duplicate reference tool');
   const report=await page.request.get(base+path,{headers:{Authorization:'Bearer '+student}});
@@ -90,7 +105,7 @@ async (page) => {
   await page.evaluate(async aid=>{selectActivity(aid);await refresh();},all.id);
   check(await page.locator('#references').isHidden(),'All-mode reference before end');
   check(await studentPage.locator('.published-reference:visible').count()===0,'All-mode reference early');
-  await page.locator('#end').click();await page.waitForFunction(()=>current.phase==='results');
+  await page.locator('#end').click(); await page.locator('#confirm-end').click();await page.waitForFunction(()=>current.phase==='results');
   await page.locator('#references > summary').click();await page.locator('#monitor-question').selectOption('2');
   check(await page.locator('#reference-override-field').isHidden(),'Manual activity has sheet option');
   await page.locator('#reference-answer').fill('全題補充答案');await page.locator('#reference-save').click();

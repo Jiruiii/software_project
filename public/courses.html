@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的課程｜課堂搶答</title><link rel="stylesheet" href="/style.css">
+  <script src="/share-code.js" defer></script>
+  <script src="/workspace.js" defer></script>
+  <script type="module" src="/courses.js"></script>
+</head>
+<body>
+  <header class="topbar"><a href="/" class="brand">課堂搶答</a></header>
+  <main class="course-home">
+    <h1 id="title">課堂搶答</h1>
+    <nav id="login-roles" class="role-switch" aria-label="選擇身分" hidden><button id="student" aria-pressed="true">學生</button><button id="staff" aria-pressed="false">老師與助教</button></nav>
+    <p id="notice" role="status" hidden></p>
+    <section class="panel" id="login" hidden><h2 id="intro">登入你的小組</h2><p id="hint">使用自己的 Google 帳號登入，再加入或建立課程小組。</p><button id="google" class="primary" disabled>使用 Google 帳號登入</button></section>
+    <div id="workspace"></div>
+  </main>
+</body></html>

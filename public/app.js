@@ -16,6 +16,23 @@ function el(tag, text, cls) {
   if (cls) node.className = cls;
   return node;
 }
+function checkedOptions(group) {
+  return [...group.querySelectorAll('input:checked')].map(box=>box.value);
+}
+function fillChecks(group, options, selected, legend) {
+  group.replaceChildren(el('legend',legend));
+  for (const value of options) {
+    const label=el('label'), box=el('input'); box.type='checkbox'; box.value=value;
+    box.checked=selected.includes(value); label.append(box,document.createTextNode(value)); group.append(label);
+  }
+}
+function answerValue(input) {
+  return input.tagName==='FIELDSET'?checkedOptions(input):input.value;
+}
+function scoreParts(parts) {
+  const signed=value=>value>0?`+${value}`:String(value);
+  return `押注分 ${signed(parts.wager)}｜搶答分 ${signed(parts.speed)}｜合計 ${signed(parts.total)}`;
+}
 function answerElapsedText(answer) {
   const origin=answer.elapsed_basis==='question'?'該題開放後':'活動開始後（舊紀錄）';
   return `${origin} ${(answer.elapsed_ms/1000).toFixed(3)} 秒`;
@@ -43,11 +60,22 @@ async function api(path, data, token = auth?.token) {
   return payload;
 }
 function showView() {
+  if(!current) activityChat.sync(null);
+  if (location.pathname==='/classroom' && !auth?.course) {
+    location.replace('/');
+    return;
+  }
   $("entry").hidden = !!auth;
   $("dashboard").hidden = !auth || auth.role !== "teacher" || !!activityId;
+  $('activity-list').closest('.panel').hidden=!!auth?.course;
   $("activity").hidden = !auth || !activityId || !current;
-  $("logout").hidden = !auth;
-  $("back").hidden = auth?.role !== "teacher";
+  const activityMenu=$('work-activity');
+  if(activityMenu) activityMenu.hidden=$('activity').hidden;
+  $("logout").hidden = !auth || !!auth.course;
+  $("back").hidden = auth?.role !== "teacher" || auth?.assistant || !!auth?.course;
+  if(auth?.course && !current) {
+    for(const id of ['teacher-tabs','teacher-controls','round-controls']) $(id).hidden=true;
+  }
 }
 function saveAuth(value) {
   resetClusterReview();
@@ -161,8 +189,18 @@ $("sheet-export").onclick = () => action($("sheet-export"), async () => {
 });
 for (const kind of ["start", "end"]) $(kind).onclick = () => action($(kind), async () => {
   if (savingSettings) return;
+  const id = activityId;
+  if (kind === 'end') {
+    const dialog = $('end-dialog');
+    $('end-title').textContent = '要結束「'+current.title+'」嗎？';
+    dialog.returnValue = '';
+    const choice = new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), {once:true}));
+    dialog.showModal();
+    dialog.querySelector('[value="cancel"]').focus();
+    if (await choice !== 'end' || activityId !== id || current?.phase !== 'active') return;
+  }
   if (kind==='start') await saveAllSettings();
-  await api(`/api/activities/${activityId}/${kind}`, {}); await refresh();
+  await api(`/api/activities/${id}/${kind}`, {}); await refresh();
 });
 
 function timeText(seconds) { return new Date(seconds * 1000).toLocaleTimeString("zh-TW", {hour12:false}); }
@@ -174,7 +212,7 @@ async function downloadFile(path, filename) {
 }
 $("download-csv").onclick = () => action($("download-csv"), () => downloadFile(`/api/activities/${activityId}/csv`, "課堂搶答結果.csv"));
 $("settings-form").onsubmit = event => event.preventDefault();
-$("quiz-mode").onchange = syncModeHelp;
+$("quiz-mode").onchange = ()=>{$('quiz-fairness').checked=$('quiz-mode').value==='sequential'; syncModeHelp();};
 for (const [id, kind] of [["close-round","close"],["next-round","next"]]) $(id).onclick = () => action($(id), async () => {
   await api(`/api/activities/${activityId}/round`, {action:kind}); await refresh();
 });
@@ -185,9 +223,18 @@ function renderList(items) {
   if (!items.length) $("activity-list").append(el("p", "還沒有活動。建立第一場搶答後，紀錄會保存在這裡。", "empty"));
   for (const item of items) {
     const button = el("button", undefined, "activity-card");
-    const info = el("div"); info.append(el("strong", item.title), el("small", `代碼 ${item.code} · ${new Date(item.created_at * 1000).toLocaleDateString("zh-TW")}`));
+    const info = el("div");
+    const created = new Date(item.created_at * 1000).toLocaleDateString("zh-TW");
+    info.append(el("strong", item.title), el("small", created));
     button.append(info, el("span", phaseNames[item.phase], "phase-pill " + item.phase));
-    button.onclick = () => selectActivity(item.id); $("activity-list").append(button);
+    button.onclick = () => selectActivity(item.id);
+    if (auth?.course) {
+      $("activity-list").append(button);
+    } else {
+      const entry = el("article", undefined, "activity-list-entry");
+      entry.append(button, createShareCode('活動代碼',item.code));
+      $("activity-list").append(entry);
+    }
   }
 }
 function renderCards(state) {
@@ -199,14 +246,21 @@ function renderCards(state) {
     const inputs={};
     for (const q of unit.questions) {
       const field=el('div',undefined,'answer-field'); field.dataset.question=q;
-      const config=state.question_settings[q], choice=config.type==='choice';
-      const label=el('label',`${unit.questions.length>1?`子題 ${q}`:'本組'}答案（${choice?'單選・自動判分':'簡答・人工批改'}）`), input=el(choice?'select':'textarea');
+      const config=state.question_settings[q], choice=config.type==='choice', multiple=config.type==='multiple';
+      const label=el('label',`${unit.questions.length>1?`子題 ${q}`:'本組'}答案（${multiple?'多選・全部選對才得分':choice?'單選・自動判分':'簡答・人工批改'}）`), input=el(multiple?'fieldset':choice?'select':'textarea');
       input.className='answer-input';
+      if (multiple) {
+        fillChecks(input,config.options,[],label.textContent); input.classList.add('multi-checks'); label.hidden=true;
+      }
       if (choice) {
         const empty=el('option','請選擇一個答案'); empty.value=''; input.append(empty);
         config.options.forEach((value,index)=>{const option=el('option',`${String.fromCharCode(65+index)}. ${value}`); option.value=value; input.append(option);});
       }
       input.id=`answer-${state.questions.indexOf(q)}`; label.htmlFor=input.id; input.maxLength=2000; input.required=true;
+      if (config.prompt) {
+        const prompt=el('p',config.prompt,'question-prompt'); prompt.id=`${input.id}-prompt`;
+        input.setAttribute('aria-describedby',prompt.id); field.append(prompt);
+      }
       input.placeholder='和組員討論後，在這裡寫下答案…'; inputs[q]=input;
       const saved=el('p',undefined,'saved-answer'), time=el('p',undefined,'answer-time'); saved.hidden=time.hidden=true;
       const reference=el('aside',undefined,'published-reference'); reference.hidden=true;
@@ -220,17 +274,24 @@ function renderCards(state) {
     const button=el('button',unit.questions.length>1?'一次送出整個題組 →':'送出本組答案 →','primary wide'); button.type='submit';
     card.append(label,stake,button);
     const draftKey=`classroom.draft.${auth.token}.${state.id}.${unit.id}`; card.dataset.draftKey=draftKey;
-    try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {for (const q of unit.questions) inputs[q].value=draft.answers?.[q] || draft.answer || ''; stake.value=String(betting?(draft.stake ?? 0):0);}} catch {sessionStorage.removeItem(draftKey);}
-    const saveDraft=()=>{try {sessionStorage.setItem(draftKey,JSON.stringify({answers:Object.fromEntries(unit.questions.map(q=>[q,inputs[q].value])),stake:Number(stake.value)}));} catch {notice('瀏覽器無法保存草稿，重新整理前請先複製答案。');}};
+    try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {for (const q of unit.questions) {
+      const value=draft.answers?.[q] ?? draft.answer ?? '';
+      if(inputs[q].tagName==='FIELDSET') for(const box of inputs[q].querySelectorAll('input')) box.checked=Array.isArray(value)&&value.includes(box.value);
+      else inputs[q].value=typeof value==='string'?value:'';
+    } stake.value=String(betting?(draft.stake ?? 0):0);}} catch {sessionStorage.removeItem(draftKey);}
+    const readAnswers=()=>Object.fromEntries(unit.questions.map(q=>[q,answerValue(inputs[q])]));
+    const saveDraft=()=>{try {sessionStorage.setItem(draftKey,JSON.stringify({answers:readAnswers(),stake:Number(stake.value)}));} catch {notice('瀏覽器無法保存草稿，重新整理前請先複製答案。');}};
     for (const input of Object.values(inputs)) {input.oninput=saveDraft; input.onchange=saveDraft;} stake.onchange=saveDraft;
     card.onsubmit=event=>{
       event.preventDefault(); const requestActivity=activityId;
+      const answers=readAnswers();
+      for(const q of unit.questions) if(Array.isArray(answers[q]) && !answers[q].length) {notice(`第 ${q} 題請至少勾選一項。`); inputs[q].querySelector('input').focus(); return;}
       action(button,async()=>{
         pendingAnswers.add(unit.id); updateInputs();
         try {
           const grouped=unit.questions.length>1;
-          const data=grouped?{unit:unit.id,answers:Object.fromEntries(unit.questions.map(q=>[q,inputs[q].value])),stake:Number(stake.value)}:
-            {question:unit.questions[0],answer:inputs[unit.questions[0]].value,stake:Number(stake.value)};
+          const data=grouped?{unit:unit.id,answers,stake:Number(stake.value)}:
+            {question:unit.questions[0],answer:answers[unit.questions[0]],stake:Number(stake.value)};
           await api(`/api/activities/${requestActivity}/${grouped?'bundle':'answers'}`,data); notice(`第 ${unit.id} 題已送出。`,true);
         } finally {pendingAnswers.delete(unit.id); await refresh();}
       });
@@ -261,6 +322,7 @@ function updateInputs() {
       const answer=answers.get(field.dataset.question), input=field.querySelector('.answer-input'); input.disabled=disabled; input.hidden=!!answer;
       const saved=field.querySelector('.saved-answer'), time=field.querySelector('.answer-time'); saved.hidden=time.hidden=!answer;
       if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · ${answerElapsedText(answer)} · ${verdictNames[answer.verdict]} · ${answer.stake===0?'不押':`下注 ${answer.stake} 分`}`;}
+      if(answer?.points) time.textContent+=' · '+scoreParts(answer.points);
       const reference=field.querySelector('.published-reference'), text=current.references?.[field.dataset.question] || '';
       reference.hidden=!text; reference.querySelector('.reference-text').textContent=text;
     }
@@ -272,7 +334,7 @@ function renderMonitor(state) {
   if (lastMonitor === key) return; lastMonitor = key;
   $("monitor-summary").textContent = `${state.groups.length} 個小組已加入 · ${state.questions.length} 題 · 已收到 ${state.answers.length} 份答案`;
   const wrap = $("monitor-table"); wrap.replaceChildren();
-  if (!state.groups.length) {wrap.append(el("p", "還沒有小組加入。將上方活動代碼提供給同學即可加入。", "empty")); return;}
+  if (!state.groups.length) {wrap.append(el("p", auth?.course ? "還沒有小組進入活動。學生可從課程首頁進入。" : "還沒有小組加入。將上方活動代碼提供給同學即可加入。", "empty")); return;}
   const table = el("table"), thead = el("thead"), head = el("tr");
   head.append(el("th", "小組")); for (const q of questions) head.append(el("th", `第 ${q} 題`)); thead.append(head);
   const body = el("tbody");
@@ -285,13 +347,20 @@ function renderMonitor(state) {
         const content=el('span',answer.text,'cell-answer');
         if(answer.text.length>300) {content.tabIndex=0; content.setAttribute('role','region'); content.setAttribute('aria-label',`${group.name} 第 ${q} 題完整答案，可捲動閱讀`);}
         cell.append(content, el("small", `${timeText(answer.received_at)} · ${answerElapsedText(answer)} · ${answer.stake===0?'不押':`下注 ${answer.stake}`} · ${verdictNames[answer.verdict]}`));
+        if(answer.points) cell.append(el('small',scoreParts(answer.points)));
+        if(answer.author) cell.append(el('small','送出者　'+answer.author));
+        if(answer.reviews?.length) {
+          const history=el('details'); history.append(el('summary','批改紀錄（'+answer.reviews.length+'）'));
+          for(const r of answer.reviews) history.append(el('small',new Date(r.stamp*1000).toLocaleString()+' · '+r.email+' · '+verdictNames[r.verdict]));
+          cell.append(history);
+        }
         if (state.reviewable_questions.includes(q)) {
           const controls = el("div", undefined, "review-controls");
           for (const verdict of ['correct','incorrect']) {
             const button = el('button', verdictNames[verdict], 'text-button'); button.dataset.verdict = verdict;
             button.setAttribute('aria-label', `${group.name} 第 ${q} 題判為${verdictNames[verdict]}`);
             button.disabled = answer.verdict === verdict;
-            button.onclick = () => action(button, async () => {await api(`/api/activities/${state.id}/review`, {answer_id:answer.id, verdict}); await refresh();});
+            button.onclick = () => action(button, async () => {await api(`/api/activities/${state.id}/review`, {answer_id:answer.id, verdict, revision:answer.review_revision}); await refresh();});
             controls.append(button);
           }
           cell.append(controls);
@@ -366,8 +435,28 @@ function renderReplay(state) {
   replayKey = key; resetReplay();
   if (enabled) $("replay-question").replaceChildren(...state.questions.map(q => {const option = el("option", `第 ${q} 題`); option.value = q; return option;}));
 }
+function renderLiveRanking(state) {
+  const card=$('live-ranking'), rows=state.top_five;
+  card.hidden=!rows;
+  if(!rows) return;
+  const list=$('live-ranking-rows');
+  const key=JSON.stringify([state.id,rows,state.settings.mode,state.group_name]);
+  if(list.dataset.values===key) return;
+  list.dataset.values=key;
+  const rule=state.settings.mode==='sequential' ? '累計本場已關題的得分' : '全題模式於本場結束時計分';
+  $('live-ranking-hint').textContent=rows.length ? rule : '尚無小組加入本場。';
+  list.replaceChildren(...rows.map(row=>{
+    const item=el('li');
+    const group=el('span',row.group_name);
+    if(row.group_name===state.group_name) group.append(el('small','本組','ranking-own'));
+    item.append(el('span',`第 ${row.rank} 名`),group,el('strong',`${row.score} 分`));
+    return item;
+  }));
+}
 function renderState(state) {
   current = state;
+  activityChat.sync(state);
+  renderLiveRanking(state);
   renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
@@ -384,7 +473,11 @@ function renderState(state) {
   $('activity').classList.toggle('teacher-view',teacher);
   renderQuestionSettings(state);
   $('own-score').hidden=teacher;
+  const rule=state.speed_scoring?'前三組答對依序加 4、2、1 搶答分，不押也能搶分。':'本場沿用舊制，不計搶答分。';
+  $('speed-rule').textContent=rule;
+  $('ranking-rule').textContent='答對加押注分，答錯扣押注分；題組只計一次，全對才算答對。'+rule+' 同總分同名次。';
   if (!teacher) {
+    $('own-score-parts').textContent=scoreParts(state.own_points);
     $('own-score-total').textContent=`${state.own_score.total} 分`;
     const waiting=[];
     if(state.own_score.awaiting_close_units) waiting.push(`已送出 ${state.own_score.awaiting_close_units} 題，等待${state.settings.mode==='sequential'?'本題':'搶答'}結束`);
@@ -395,8 +488,8 @@ function renderState(state) {
   $('scoreboard').hidden=!ended;
   if (ended && $('scoreboard').dataset.values!==JSON.stringify([state.scoreboard,provisional])) {
     $('scoreboard').dataset.values=JSON.stringify([state.scoreboard,provisional]);
-    const table=el('table'), head=el('tr'); head.append(el('th','名次'),el('th','組別'),el('th',provisional?'暫時總分':'總分')); table.append(head);
-    for (const score of state.scoreboard) {const row=el('tr'); row.append(el('td',score.rank),el('th',score.group_name),el('td',score.score)); table.append(row);}
+    const table=el('table'), head=el('tr'); head.append(el('th','名次'),el('th','組別'),el('th','押注分'),el('th','搶答分'),el('th',provisional?'暫時總分':'總分')); table.append(head);
+    for (const score of state.scoreboard) {const row=el('tr'); row.append(el('td',score.rank),el('th',score.group_name),el('td',score.wager),el('td',score.speed),el('td',score.score)); table.append(row);}
     $('scoreboard-table').replaceChildren(table);
   }
   renderReport(state);
@@ -407,10 +500,16 @@ function renderState(state) {
   }
   updateClusterControls();
   $("session-title").textContent = state.title;
-  $("session-code").textContent = state.code;
+  const code = auth?.course || state.code;
+  const block = $('session-code-block');
+  if (block.dataset.value !== code) {
+    block.dataset.value = code;
+    block.replaceChildren(createShareCode(auth?.course?'課程代碼':'活動代碼',code,'session-code'),
+      el('p',auth?.course?'從課程首頁加入小組，再選擇本場活動。':'讓同學在另一個分頁輸入此代碼。'));
+  }
   $("session-subtitle").textContent = teacher ? `${state.questions.length} 道題目 · ${state.groups.length} 個小組已加入` : `${state.questions.length} 道題目`;
-  $("role-badge").textContent = teacher ? "教師" : state.group_name;
-  $("teacher-controls").hidden = !teacher || ended;
+  $("role-badge").textContent = teacher ? (auth?.assistant?"助教":"教師") : state.group_name;
+  $("teacher-controls").hidden = !teacher || ended || auth?.assistant;
   $("start").hidden = state.phase !== "preparing";
   $("end").hidden = state.phase !== "active";
   $("phase-label").textContent = phaseNames[state.phase]; $("phase-label").className = "phase-pill " + state.phase;
@@ -441,14 +540,14 @@ function renderState(state) {
   const sequential = state.settings.mode === "sequential";
   $('countdown').hidden=state.round.deadline===null || state.phase!=='active';
   $('countdown').textContent=`剩餘 ${Math.max(0,Math.ceil(state.round.deadline-state.server_time))} 秒 · 到期自動${sequential?'關閉本題':'公布結果'}`;
-  $("round-controls").hidden = !teacher || !sequential || state.phase !== "active";
+  $("round-controls").hidden = !teacher || auth?.assistant || !sequential || state.phase !== "active";
   $("close-round").hidden = !state.round.round_open;
   $("next-round").hidden = !!state.round.round_open;
   $("round-status").hidden = !sequential || ended || (teacher && state.phase==='preparing');
   const priorityLeft = Math.max(0, Math.ceil(state.round.priority_until - state.server_time));
   $("round-status").textContent = state.round.unit_id === null ? "逐題模式：老師開始後開放第一題。" :
     `目前第 ${state.round.unit_id} 題 · ${state.round.round_open && !ended ? "作答中" : "已關閉"}` +
-    (priorityLeft && !ended ? ` · 保底先答剩 ${priorityLeft} 秒${state.round.own_priority ? "（本組可先答）" : ""}` : "");
+    (priorityLeft && state.round.round_open && !ended ? ` · 保底先答剩 ${priorityLeft} 秒${state.round.own_priority ? "（本組可先答）" : ""}` : "");
   $("sheet-export-controls").hidden = !teacher || !state.source;
   if (teacher && state.source) {
     const sync=state.source.sync || {state:'idle',message:'關題後自動同步學習單。'};
@@ -460,10 +559,6 @@ function renderState(state) {
     $("sheet-export").textContent = '重試同步';
   }
   if (teacher) {syncMonitorFilter(state); renderMonitor(state);} else renderCards(state);
-  if(teacher && state.settings.legacy_fairness) {
-    $('round-status').hidden=false;
-    $('round-status').textContent=(ended?'':$('round-status').textContent+' · ')+'舊活動缺少歷史保底紀錄，保留既有累計並從更新後接續計算。';
-  }
   if (ended) renderResults(state);
   renderTeacherWorkspace(state);
   updateInputs();
@@ -562,9 +657,9 @@ function renderReport(state) {
   if (!teacher) {
     const key=JSON.stringify([state.id,state.report]); if (key===reportKey) return; reportKey=key;
     const table=el('table'), head=el('tr');
-    for (const title of ['題號','本組答案','判定','下注','單位得分','搶答成功','參考答案']) head.append(el('th',title));
+    for (const title of ['題號','本組答案','判定','下注','押注分','搶答分','單位合計','搶答成功','參考答案']) head.append(el('th',title));
     table.append(head);
-    for (const r of state.report) {const row=el('tr'); for (const value of [r.question,r.answer,verdictNames[r.verdict],r.stake??'—',r.points??'同題組',r.successful?'是':'否',r.reference||'老師尚未填寫']) row.append(el('td',value)); table.append(row);}
+    for (const r of state.report) {const row=el('tr'); for (const value of [r.question,r.answer,verdictNames[r.verdict],r.stake??'—',r.wager??'—',r.speed??'—',r.points??'同題組',r.successful?'是':'否',r.reference||'老師尚未填寫']) row.append(el('td',value)); table.append(row);}
     $('report-table').replaceChildren(table);
   }
 }
@@ -671,8 +766,11 @@ function renderQuestionSettings(state) {
     const configs=[];
     for (const [childIndex,q] of unit.questions.entries()) {
       const config=state.question_settings[q], box=el('section',undefined,'question-config-child'); box.dataset.question=q;
+      const prompt=el('textarea'), promptLabel=el('label',`第 ${q} 題的題目內容（選填）`);
+      prompt.id=`prompt-${index}-${childIndex}`; promptLabel.htmlFor=prompt.id; prompt.rows=3;
+      prompt.defaultValue=config.prompt || ''; prompt.placeholder='輸入要讓學生閱讀的題目'; box.append(promptLabel,prompt);
       const kind=el('select'), label=el('label',`第 ${q} 題的題型`); kind.id=`question-type-${index}-${childIndex}`; kind.className='question-type'; label.htmlFor=kind.id;
-      for (const [value,title] of [['short','簡答（人工批改）'],['choice','單選（自動判分）']]) {const option=el('option',title); option.value=value; kind.append(option);}
+      for (const [value,title] of [['short','簡答（人工批改）'],['choice','單選（自動判分）'],['multiple','多選（全部選對才得分）']]) {const option=el('option',title); option.value=value; kind.append(option);}
       kind.value=config.type; box.append(label,kind);
       const choiceBox=el('div',undefined,'choice-settings'), options=el('textarea'), optionLabel=el('label','選項（每行一個，2～8 個，每個最多 200 字）');
       options.id=`choice-options-${index}-${childIndex}`; options.className='choice-options'; options.rows=4; options.maxLength=2000; options.value=config.options.join('\n'); optionLabel.htmlFor=options.id;
@@ -685,25 +783,28 @@ function renderQuestionSettings(state) {
         const found=lines().indexOf(old); correct.value=found<0?'':String(found);
       };
       rebuild(config.correct_index===null?undefined:config.options[config.correct_index]);
-      const toggle=()=>{choiceBox.hidden=kind.value!=='choice'; options.required=correct.required=kind.value==='choice'; options.disabled=correct.disabled=kind.value!=='choice';};
-      kind.onchange=toggle; options.oninput=()=>rebuild(); toggle();
-      choiceBox.append(optionLabel,options,correctLabel,correct); box.append(choiceBox); fields.append(box);
-      configs.push({q,kind,lines,correct});
+      const keys=el('fieldset',undefined,'multi-checks'), rebuildKeys=selected=>fillChecks(keys,lines(),selected,'勾選全部正確選項（僅老師可見）');
+      rebuildKeys((config.correct_indices||[]).map(i=>config.options[i]));
+      const toggle=()=>{choiceBox.hidden=options.disabled=kind.value==='short'; options.required=!options.disabled; correctLabel.hidden=correct.hidden=correct.disabled=kind.value!=='choice'; correct.required=!correct.disabled; keys.hidden=keys.disabled=kind.value!=='multiple';};
+      kind.onchange=toggle; options.oninput=()=>{rebuild();rebuildKeys(checkedOptions(keys));}; toggle();
+      choiceBox.append(optionLabel,options,correctLabel,correct,keys); box.append(choiceBox); fields.append(box);
+      configs.push({q,kind,lines,correct,prompt,keys});
     }
     const status=el('p','設定已儲存','field-hint');
-    const summarize=()=>{description.textContent=`${configs.map(c=>c.kind.value==='choice'?'單選':'簡答').filter((v,i,a)=>a.indexOf(v)===i).join('＋')} · ${betting.checked?'可下注':'不押分'}`;};
+    const summarize=()=>{description.textContent=`${configs.map(c=>({choice:'單選',multiple:'多選',short:'簡答'})[c.kind.value]).filter((v,i,a)=>a.indexOf(v)===i).join('＋')} · ${betting.checked?'可下注':'不押分'}`;};
     const dirty=()=>{form.dataset.dirty='true'; status.textContent='尚未儲存，開始前會一起儲存'; summarize(); updateSetupStatus();}; form.oninput=dirty; form.onchange=dirty; summarize();
     fields.append(status); form.append(fields);
     form.prepareSettings=()=>{
-      const questions=configs.map(c=>({question:c.q,type:c.kind.value,options:c.kind.value==='choice'?c.lines():[],correct_index:c.correct.value===''?null:Number(c.correct.value)}));
-      for (const q of questions) if(q.type==='choice' && (q.options.length<2 || q.options.length>8 || q.options.some(x=>x.length>200) || new Set(q.options).size!==q.options.length || q.correct_index===null || q.correct_index>=q.options.length)) {
-        showTeacherView('questions'); details.open=true; const box=form.querySelector(`[data-question="${CSS.escape(q.question)}"]`); box.scrollIntoView({block:'center'}); box.querySelector(q.correct_index===null?'.choice-correct':'.choice-options').focus();
+      const questions=configs.map(c=>({question:c.q,type:c.kind.value,options:c.kind.value==='short'?[]:c.lines(),correct_index:c.correct.value===''?null:Number(c.correct.value),correct_indices:checkedOptions(c.keys).map(v=>c.lines().indexOf(v))}));
+      configs.forEach((c,i)=>{if(c.prompt.value!==c.prompt.defaultValue) questions[i].prompt=c.prompt.value;});
+      for (const q of questions) if(q.type!=='short' && (q.options.length<2 || q.options.length>8 || q.options.some(x=>x.length>200) || new Set(q.options).size!==q.options.length || (q.type==='multiple'?!q.correct_indices.length:q.correct_index===null || q.correct_index>=q.options.length))) {
+        showTeacherView('questions'); details.open=true; const box=form.querySelector(`[data-question="${CSS.escape(q.question)}"]`); box.scrollIntoView({block:'center'}); box.querySelector(q.type==='choice' && q.correct_index===null?'.choice-correct':'.choice-options').focus();
         throw new Error(`第 ${q.question} 題：請填寫 2～8 個不重複選項（每項最多 200 字），並指定正確選項。`);
       }
       return {unit:unit.id,betting_enabled:betting.checked,questions};
     };
     form.persistSettings=async payload=>{
-      try {await api(`/api/activities/${state.id}/question-settings`,payload); form.dataset.dirty='false'; status.textContent='設定已儲存'; updateSetupStatus();}
+      try {await api(`/api/activities/${state.id}/question-settings`,payload); configs.forEach((c,i)=>{if ('prompt' in payload.questions[i]) c.prompt.defaultValue=payload.questions[i].prompt;}); form.dataset.dirty='false'; status.textContent='設定已儲存'; updateSetupStatus();}
       catch(error) {showTeacherView('questions'); details.open=true; summary.scrollIntoView({block:'center'}); throw new Error(`第 ${unit.id} 題儲存失敗：${error.message}`);}
     };
     form.onsubmit=event=>event.preventDefault();
@@ -745,8 +846,12 @@ function renderTeacherWorkspace(state) {
   $('teacher-question-filter').hidden=true;
   if(!teacher) return;
   const key=state.id+state.phase;
-  if(teacherViewKey!==key) {teacherViewKey=key; teacherView=preparing?'settings':ended?'results':'monitor';}
-  const allowed=preparing?['settings','questions','monitor']:ended?['results','monitor','tools']:['monitor','tools'];
+  if(teacherViewKey!==key) {
+    teacherViewKey=key;
+    const openReview=location.hash==='#review-'+state.id;
+    teacherView=(auth?.assistant || openReview)?'monitor':preparing?'settings':ended?'results':'monitor';
+  }
+  const allowed=preparing?(auth?.assistant?['monitor']:['settings','questions','monitor']):ended?['results','monitor','tools']:['monitor','tools'];
   const pending=state.answers.filter(a=>a.verdict==='pending' && state.reviewable_questions.includes(a.question_id)).length;
   for(const button of $('teacher-tabs').children) {
     button.hidden=!allowed.includes(button.dataset.view);
@@ -756,7 +861,7 @@ function renderTeacherWorkspace(state) {
   const sections={settings:['settings-form'],questions:['question-settings'],monitor:['teacher-monitor'],results:['results','scoreboard','result-actions'],tools:[]};
   for(const id of ['settings-form','question-settings','teacher-monitor','results','scoreboard','result-actions']) $(id).hidden=!sections[teacherView]?.includes(id);
   $('content-title').textContent={settings:'1. 設定活動方式',questions:'2. 設定題目與計分',monitor:preparing?'等待小組加入':'查看作答與批改',results:'本次搶答成果',tools:'更多教學工具'}[teacherView];
-  $('phase-help').textContent={settings:'選擇開放方式與時間，再設定題目。',questions:'單選自動批改；簡答由老師批改。開始後不能修改設定。',monitor:preparing?'分享活動代碼；同組使用相同組名。':'答案自動更新，關題後可批改。',results:'選題查看成功答案，全部組別總分列於下方。',tools:'選擇需要的工具展開。'}[teacherView];
+  $('phase-help').textContent={settings:'選擇開放方式與時間，再設定題目。',questions:'單選與多選自動批改；簡答由老師批改。開始後不能修改設定。',monitor:preparing?'分享活動代碼；同組使用相同組名。':'答案自動更新，關題後可批改。',results:'選題查看成功答案，全部組別總分列於下方。',tools:'選擇需要的工具展開。'}[teacherView];
   $('grading-review').hidden=!ended || !pending || teacherView==='monitor';
   $('monitor-privacy').hidden=preparing;
   for(const id of ['replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
@@ -767,6 +872,10 @@ function renderTeacherWorkspace(state) {
   $('start').textContent='開始搶答 →';
   $('end').textContent=state.settings.mode==='sequential'?'提早結束整場':'結束搶答並公布結果';
   updateSetupStatus();
+  if (auth?.course && preparing && teacherView==='monitor') $('phase-help').textContent='學生加入課程小組後，可從活動清單進入。';
+  if (auth?.assistant) {
+    for(const id of ['setup-status','result-actions','references','sheet-export-controls','tool-replay']) $(id).hidden=true;
+  }
 }
 function activitySettingsPayload() {
   if(!$('quiz-duration').checkValidity()) {showTeacherView('settings'); $('quiz-duration').focus(); $('quiz-duration').reportValidity(); throw new Error('作答時間請填 0～3600 的整數秒。');}

@@ -20,45 +20,45 @@ class FairnessReviewTests(unittest.TestCase):
         self.clock=patch('quiz_extras.time.time',return_value=1000);self.clock.start()
         self.s.transition(self.t,self.aid,'active')
     def tearDown(self): self.clock.stop();self.s.close();self.folder.cleanup()
-    def answer_round(self,q):
-        self.s.submit(self.u,self.aid,q,'a');self.s.submit(self.v,self.aid,q,'b')
+    def test_total_includes_speed_and_wager_and_handles_ties(self):
+        self.s.submit(self.u,self.aid,'1','A',0)
+        self.s.submit(self.v,self.aid,'1','B',3)
         self.s.round_action(self.t,self.aid,'close')
-        return [a for a in self.s.snapshot(self.t,self.aid)['answers'] if a['question_id']==q]
-    def test_regrade_uses_latest_winner_and_late_joiner(self):
-        for q in ['1','2','3']:
-            answers=self.answer_round(q)
-            self.s.review(self.t,self.aid,answers[0]['id'],'incorrect')
-            self.s.review(self.t,self.aid,answers[1]['id'],'correct')
-            if q=='3':late=self.s.join(self.a['code'],'late')['token']
-            self.s.round_action(self.t,self.aid,'next')
-        self.assertTrue(self.s.snapshot(self.u,self.aid)['round']['own_priority'])
-        self.assertFalse(self.s.snapshot(self.v,self.aid)['round']['own_priority'])
-        self.assertFalse(self.s.snapshot(late,self.aid)['round']['own_priority'])
-        self.s.round_action(self.t,self.aid,'close');self.s.round_action(self.t,self.aid,'next')
-        self.assertFalse(self.s.snapshot(self.u,self.aid)['round']['own_priority'])
-    def test_batch_undo_replay_restart_and_current_round_frozen(self):
-        for q in ['1','2','3']:
-            answers=self.answer_round(q)
-            batch=self.s.review_batch(self.t,self.aid,q,[{'id':answers[0]['id'],'revision':0}],'incorrect')
-            if q!='3':self.s.round_action(self.t,self.aid,'next')
-        self.s.undo_review_batch(self.t,self.aid,batch['batch_id'])
-        self.s.close();self.s=QuizService(self.path,'test')
+        for answer in self.s.snapshot(self.t,self.aid)['answers']:
+            self.s.review(self.t,self.aid,answer['id'],'correct')
         self.s.round_action(self.t,self.aid,'next')
-        self.assertFalse(self.s.snapshot(self.u,self.aid)['round']['own_priority'])
+        # A: 0+4; B: 3+2. Only A gets priority.
+        self.assertTrue(self.s.snapshot(self.u,self.aid)['round']['own_priority'])
         self.assertFalse(self.s.snapshot(self.v,self.aid)['round']['own_priority'])
-        before=dict(self.s.snapshot(self.u,self.aid)['round'])
-        self.s.review(self.t,self.aid,answers[0]['id'],'incorrect')
-        self.assertEqual(before,self.s.snapshot(self.u,self.aid)['round'])
+        self.s.round_action(self.t,self.aid,'close')
+        late=[self.s.join(self.a['code'],name)['token'] for name in ('C','D')]
+        self.s.round_action(self.t,self.aid,'next')
+        for token in late: self.assertTrue(self.s.snapshot(token,self.aid)['round']['own_priority'])
+        for token in (self.u,self.v): self.assertFalse(self.s.snapshot(token,self.aid)['round']['own_priority'])
+
+    def test_batch_regrade_and_restart_do_not_change_open_round(self):
+        self.s.submit(self.u,self.aid,'1','A',3)
+        self.s.round_action(self.t,self.aid,'close')
+        answer=self.s.snapshot(self.t,self.aid)['answers'][0]
+        batch=self.s.review_batch(self.t,self.aid,'1',[{'id':answer['id'],'revision':0}],'correct')
+        self.s.round_action(self.t,self.aid,'next')
+        before=self.s.snapshot(self.v,self.aid)['round']
+        self.assertTrue(before['own_priority'])
+        self.s.undo_review_batch(self.t,self.aid,batch['batch_id'])
+        self.s.review(self.t,self.aid,answer['id'],'incorrect')
+        self.s.close();self.s=QuizService(self.path,'test')
+        self.assertEqual(before,self.s.snapshot(self.v,self.aid)['round'])
         self.s.round_action(self.t,self.aid,'close');self.s.round_action(self.t,self.aid,'next')
         self.assertTrue(self.s.snapshot(self.u,self.aid)['round']['own_priority'])
-    def test_legacy_baseline_is_preserved_and_new_rounds_tracked(self):
-        self.s.db.execute('DROP TABLE fairness_rounds');self.s.db.execute('DROP TABLE fairness_baselines')
-        gid=self.s.db.execute("SELECT id FROM groups WHERE name='B'").fetchone()[0]
-        self.s.db.execute('INSERT OR REPLACE INTO group_progress VALUES(?,2)',(gid,));self.s.db.commit()
-        self.s.close();self.s=QuizService(self.path,'test')
-        self.assertTrue(self.s.snapshot(self.t,self.aid)['settings']['legacy_fairness'])
-        self.answer_round('1');self.s.round_action(self.t,self.aid,'next')
-        self.assertTrue(self.s.snapshot(self.v,self.aid)['round']['own_priority'])
+        self.assertFalse(self.s.snapshot(self.v,self.aid)['round']['own_priority'])
+
+    def test_empty_roster_has_no_priority_window(self):
+        a=self.s.create(self.t,'empty',['1'])
+        self.s.configure(self.t,a['id'],'sequential',True)
+        self.s.transition(self.t,a['id'],'active')
+        late=self.s.join(a['code'],'late')['token']
+        self.assertEqual(0,self.s.snapshot(late,a['id'])['round']['priority_until'])
+        self.s.submit(late,a['id'],'1','立即')
 
 
 class RecoveryTests(unittest.TestCase):
@@ -136,7 +136,7 @@ class GradingStateTests(unittest.TestCase):
             self.assertIn('暫時成績',s.report_csv(u,aid).decode('utf-8-sig'))
             answer=s.snapshot(t,aid)['answers'][0]
             batch=s.review_batch(t,aid,'1',[{'id':answer['id'],'revision':0}],'correct')
-            self.assertTrue(s.snapshot(u,aid)['grading']['complete']);self.assertEqual(3,s.snapshot(u,aid)['own_score']['total'])
+            self.assertTrue(s.snapshot(u,aid)['grading']['complete']);self.assertEqual(7,s.snapshot(u,aid)['own_score']['total'])
             self.assertIn('批改完成',s.report_csv(u,aid).decode('utf-8-sig'))
             s.undo_review_batch(t,aid,batch['batch_id']);self.assertFalse(s.snapshot(u,aid)['grading']['complete'])
             empty=s.create(t,'empty',['1']);s.transition(t,empty['id'],'active');s.transition(t,empty['id'],'results')

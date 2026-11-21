@@ -21,7 +21,7 @@ from guided_notes import from_xlsx, parse_grid
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--suite',choices=['extras','question-types','teacher-ui','batch-review','question-timing','auto-sync','teacher-reference','review-flow'],default='extras')
+    parser.add_argument('--suite',choices=['extras','question-types','multiple','teacher-ui','batch-review','question-timing','auto-sync','teacher-reference','review-flow','courses'],default='extras')
     suite=parser.parse_args().suite
     output = ROOT/"output/playwright"; output.mkdir(parents=True, exist_ok=True)
     service = QuizService(":memory:", "extras-test-only")
@@ -57,6 +57,17 @@ def main():
         service.question_settings(teacher, activity['id'], '2', True,
                                   [{'question':'2','type':'choice','options':['正解','錯誤選項'],'correct_index':0}])
     service.logout(teacher)
+    if suite == 'courses':
+        from course_accounts import Courses
+        from quiz_service import QuizError
+        def verify_fixture(token, project):
+            if token not in ('admin', 'teacher', 'student', 'assistant'):
+                raise QuizError(401, '未知的測試帳號')
+            return token, token+'@example.org'
+        accounts = Courses(service, dict(apiKey='fixture',projectId='demo',authDomain='demo.firebaseapp.com',appId='web'), 'admin', verify_fixture)
+        accounts.dispatch('teacher','home',{})
+        accounts.dispatch('assistant','home',{})
+        accounts.dispatch('admin','grant',{'uid':'teacher'})
     server = make_server(service, 0, SheetsWorkflow(service, connection))
     thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
     npx = shutil.which("npx.cmd" if os.name == "nt" else "npx")

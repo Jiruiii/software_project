@@ -2,6 +2,8 @@
 
 `POST /api/activities/{活動 id}/question-settings` 僅教師在準備中可呼叫。
 
+多選使用 `type: "multiple"`、`options` 與 `correct_indices`（至少一個相異的有效索引，例如 `[0,2]`）。學生以選項文字陣列送出答案，例如 `["丙","甲"]`；題組的對應子題也使用陣列。順序不影響判分，漏選或多勾均判錯；空白、未知與重複選項會拒收。結果依題目原順序每行顯示一項。
+
 ```json
 {
   "unit": "1",
@@ -16,6 +18,22 @@
 
 原 `answers` 與 `bundle` 提交介面維持使用選項原文作為答案。`stake` 接受 0～3 整數，省略時為 0；0 為不押，關閉下注時只能是 0。單選由伺服器寫入判定，不採用客戶端提供的分數、判定或正解。簡答仍等待人工批改；重送不覆蓋原答案或已更正的判定。
 
-教師狀態含完整 `question_settings`，學生狀態只含題型、選項與下注開關，不含 `correct_index`。舊活動仍為簡答，已儲存的下注值不變。
+各子題可帶 `prompt` 設定題目文字；省略保留原值，傳空字串清除。有表頭的學習單會從「題目」欄預填。教師狀態含完整 `question_settings`；學生可見題型、選項與下注開關，該題開放後才取得 `prompt`，不含 `correct_index`。
 
-學生狀態另含 `own_score: {"total": 0, "pending_units": 0}`，由登入身分綁定的本組答案計算。同場活動累積，未作答單位不計入待判定，題組有錯直接扣分、全部正確才加分，其餘等待人工批改；不押分數永遠是零。活動結束前不傳他組分數及排行。
+學生狀態另含 `own_score: {"total": 0, "pending_units": 0, "awaiting_close_units": 0}`，由登入身分綁定的本組答案計算。`pending_units` 是已關題而待批改的單位數，`awaiting_close_units` 是已送出、等待關題公布的單位數。題組有錯即扣押注分、全部正確才加分，其餘等待人工批改。新制每個單位前三組全對另加 4、2、1 分；`own_points` 回傳已公布的 `wager`、`speed`、`total`。
+
+作答中的師生快照另含 `top_five`，最多五列，每列提供 `rank`、`group_name` 與 `score`。名次依本場已公布總分計算，逐題模式關題後計入，全題模式結束時公布。結果階段以 `scoreboard` 提供完整排名。
+
+## 課程紀錄、排行與本場討論
+
+帳號端點以 Firebase ID token 作為 Bearer 憑證，送出 JSON。活動端點使用進入該課程活動時取得的工作階段 token。
+
+| 請求 | 傳入與回傳 |
+| --- | --- |
+| `POST /api/account/course` | 傳入 `course`。學生取得活動清單與本組累積總分。教學人員以 `staff: true` 讀取獲授權課程。 |
+| `POST /api/account/history-detail` | 傳入 `course`、`aid`。學生讀本組紀錄，授課老師與受邀助教可加 `staff: true` 查各組的作答與批改歷程。 |
+| `POST /api/account/leaderboard` | 傳入 `course`，回傳 `rows`，每列含 `rank`、`group_name`、`score`。老師限自己建立的課程，學生限已加入的課程。 |
+| `GET /api/activities/{aid}/chat?after=0` | 本場有頻道權限的學生可取 `messages`，每筆含 `id`、`group_name`、`body`。後續用最後一筆的 `id` 取下一批，每次最多 100 筆。 |
+| `POST /api/activities/{aid}/chat` | 傳入 `body`（1～500 字）與 `request_id`。小組署名取自登入身分，同一小組重送相同請求及內容時只保留一份。 |
+
+學生快照的 `chat_available` 表示本場是否可討論。整場結束會刪除該場訊息，結束後的歷史資料仍可從課程紀錄查詢作答與判定。

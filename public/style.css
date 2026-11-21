@@ -52,3 +52,128 @@ select{color:var(--ink);background:#fdfefa}summary{cursor:pointer;outline-offset
   .score-card{gap:4px 10px;padding:14px}.score-card strong{font-size:26px}#monitor-privacy{margin:8px 0 14px}#monitor-table td{min-width:190px}#monitor-table th:first-child{min-width:90px}
   #scoreboard-table th,#scoreboard-table td{padding:12px 10px}#scoreboard-table tr>:first-child{width:52px}#scoreboard-table tr>:last-child{width:76px}#scoreboard-table tr:first-child th{white-space:nowrap}
 }
+.question-prompt{white-space:pre-wrap;overflow-wrap:anywhere;font-weight:600;line-height:1.6}
+.multi-checks{min-width:0;border:0;margin:0;padding:0}.multi-checks label{display:flex;align-items:center;gap:.6rem;overflow-wrap:anywhere;min-height:2.5rem}.multi-checks input[type=checkbox]{width:1.15rem;height:1.15rem;flex:none}
+.course-home{max-width:850px}.course-home .role-switch{max-width:420px;margin-bottom:20px}.course-home .panel{margin:16px 0}.course-home .panel>button,.course-home form button{margin-top:12px}.course-home details{margin-top:24px;overflow-wrap:anywhere}.course-home .activity-card{font-weight:600}.course-home .score-card{font-size:20px;font-weight:700}
+.has-workspace {
+  --rail-width: 212px;
+  --ink: #37352f;
+  --muted: #706e68;
+  --line: #e7e6e2;
+  --paper: #f7f7f4;
+  background: white;
+  color: var(--ink);
+}
+.has-workspace .topbar {
+  position: sticky; top: 0; z-index: 8; height: 60px; background: white;
+  padding: 0 24px; gap: 12px; border-bottom: 1px solid var(--line);
+}
+.has-workspace .topbar .brand {font-size:18px;margin-right:auto}
+.has-workspace .topbar .brand-detail {display:none}
+.has-workspace main {
+  margin: 0 var(--rail-width) 0 0; max-width: 1320px;
+  padding: clamp(28px,5vw,72px) clamp(18px,5vw,72px);
+}
+.has-workspace .course-home {max-width:1030px;min-height:calc(100vh - 60px)}
+.has-workspace #dashboard .dashboard-grid{grid-template-columns:minmax(0,740px)}
+.has-workspace h1 {letter-spacing:-.045em;line-height:1.25}
+.has-workspace .course-home h1 {font-size:clamp(30px,4vw,44px);margin:0 0 22px}
+.has-workspace .course-home .role-switch {width:fit-content;margin-bottom:26px;background:#f3f2ef}
+.has-workspace .role-switch button {white-space:nowrap;padding:8px 16px}
+.has-workspace .course-home .panel {
+  padding:22px 0; margin:0; border:0; border-top:1px solid var(--line); border-radius:0;
+}
+.has-workspace .course-home h2 {font-size:20px}
+.has-workspace .course-home form {max-width:520px}
+.has-workspace .course-home input {background:white}
+.has-workspace .session-sidebar {top:65px}
+.work-rail {
+  position:fixed;right:0;top:60px;bottom:0;width:var(--rail-width);z-index:6;overflow-y:auto;
+  background:#f7f7f5;border-left:1px solid var(--line);padding:20px 12px;
+}
+.work-rail .rail-heading:not(:first-child){margin-top:16px;border-top:1px solid var(--line);padding-top:16px;overflow-wrap:anywhere}
+.work-rail #teacher-tabs{display:grid;gap:2px;margin:16px 0 0;padding:12px 0 0;border-top:1px solid var(--line);border-bottom:0}
+.work-rail #teacher-tabs button{text-align:left}
+.work-rail #teacher-controls,.work-rail #round-controls{display:grid;gap:6px;margin-top:12px}
+.work-rail #round-controls button{margin:0}
+.rail-heading,.profile-name {display:block;font-size:13px;font-weight:650;color:var(--muted);padding:8px 10px}
+.work-link {
+  display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:5px;
+  color:var(--ink);background:transparent;font:inherit;font-size:14px;text-align:left;
+}
+.work-link:hover,.work-link[aria-current="page"] {background:#eaeae6}
+.rail-icon {width:18px;text-align:center;color:#77766f}
+.work-profile {position:relative;flex-shrink:0}
+.work-avatar {
+  display:grid;place-items:center;position:relative;overflow:hidden;width:36px;height:36px;
+  background:#ece8df;color:#514d42;border:1px solid #d9d5ca;border-radius:50%;font-weight:bold
+}
+.work-avatar img {position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.work-menu {
+  position:absolute;right:0;top:44px;width:220px;max-width:85vw;
+  background:white;border:1px solid var(--line);border-radius:9px;padding:6px;box-shadow:0 8px 28px #24232119;
+}
+.profile-name {overflow-wrap:anywhere;border-bottom:1px solid var(--line)}
+.rail-toggle {display:none;background:transparent;font-size:20px;padding:6px}
+.course-home .record {margin:12px 0;border-top:1px solid var(--line);padding:12px 0}
+.record summary {font-weight:650;line-height:1.8}
+.record summary small {font-weight:400;color:var(--muted);margin-left:12px}
+.answer-record {border-left:2px solid var(--line);padding:5px 14px;margin:16px 0}
+.answer-record p {white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0}
+.answer-record small {display:block;color:var(--muted);line-height:1.7}
+#end-dialog {border:1px solid var(--line);border-radius:12px;padding:24px;width:min(460px,90vw);color:var(--ink)}
+#end-dialog::backdrop {background:#17181466}
+#end-dialog h2 {overflow-wrap:anywhere}
+@media (max-width:760px) {
+  .has-workspace main {margin:0;padding:26px 18px}
+  .has-workspace .topbar {padding:0 14px}
+  .rail-toggle {display:inline-block}
+  .work-rail {display:none;max-width:85vw;box-shadow:-4px 8px 24px #19191918}
+  .work-rail.unfold {display:block}
+  .record summary small {display:block;margin-left:16px}
+}
+.course-ranking {table-layout:fixed;font-size:1rem;font-variant-numeric:tabular-nums}
+.course-ranking th,.course-ranking td {min-width:0;padding:12px 8px;overflow-wrap:anywhere}
+.course-ranking tr>:first-child {width:4em}
+.course-ranking tr>:last-child {width:6em;text-align:right}
+.ranking-own {display:inline-block;margin-inline-start:.6em;color:var(--green)}
+.live-ranking {position:sticky;top:76px;margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:10px;background:white;font-size:14px}
+.live-ranking summary {cursor:pointer;font-weight:700}
+.teacher-view .live-ranking {position:static;min-width:min(100%,13rem);margin:0}
+.live-ranking p {margin:7px 0;color:var(--muted);font-size:12px}
+.live-ranking ol {list-style:none;margin:0;padding:0;font-variant-numeric:tabular-nums}
+.live-ranking li {display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:baseline;gap:6px;padding:6px 0;border-top:1px solid var(--line)}
+.live-ranking li span:nth-child(2) {overflow-wrap:anywhere}
+.live-ranking li span:first-child {font-size:12px;color:var(--muted)}
+@media (max-width:760px) {
+  .live-ranking {position:static}
+}
+.activity-chat {position:fixed;left:max(14px,env(safe-area-inset-left));bottom:max(14px,env(safe-area-inset-bottom));z-index:5;border:1px solid var(--line);border-radius:12px;background:white;box-shadow:0 4px 20px #172c211c;font-size:14px}
+.activity-chat summary {cursor:pointer;padding:11px 16px;color:white;background:var(--green);border-radius:11px;font-weight:700}
+.activity-chat[open] {width:min(340px,calc(100vw - 28px));max-height:80dvh;overflow:auto}
+.activity-chat[open] summary {border-radius:11px 11px 0 0}
+.chat-panel {padding:12px}
+.chat-context,#chat-send-status {color:var(--muted);font-size:12px;margin:0 0 8px}
+.chat-panel p:empty {display:none}
+#chat-log {max-height:min(35dvh,240px);overflow:auto;overscroll-behavior:contain;overflow-wrap:anywhere}
+#chat-log p {margin:0 0 8px}
+#chat-log strong,#chat-log span {display:block}
+#chat-log strong {font-size:12px;color:var(--green)}
+#chat-log span {white-space:pre-wrap}
+#chat-form {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;margin-top:8px}
+#chat-form label {grid-column:1/-1;margin:0;overflow-wrap:anywhere}
+#chat-form input,#chat-form button {margin:0;min-width:0}
+#chat-send-status:not(:empty) {margin:6px 0 0;color:var(--red)}
+.share-code {display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-width:0;max-width:100%}
+.share-code>span {font-size:13px;white-space:nowrap}
+.share-code code {min-width:0;max-width:100%;overflow-wrap:anywhere;user-select:all;font:600 1rem/1.45 ui-monospace,monospace;letter-spacing:.035em}
+.share-code button {padding:6px 10px;min-width:4.6em;border:1px solid currentColor;border-radius:6px;color:inherit;background:transparent;font-size:13px;white-space:nowrap}
+.share-code button:hover {text-decoration:underline}
+.share-code>small {flex-basis:100%;font-size:12px}
+.code-block .share-code {flex:1 1 auto}
+.code-block .share-code code {color:var(--lime)}
+.teacher-view .code-block .share-code code {color:var(--green)}
+.teacher-view .code-block {min-width:0}
+.activity-list-entry {padding:12px 0 16px;border-bottom:1px solid var(--line)}
+.activity-list-entry>.activity-card {border:0;padding:4px 0 10px}
+.activity-list-entry:last-child {border-bottom:0}

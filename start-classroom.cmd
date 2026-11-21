@@ -1,6 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" app.py %*
+    goto :done
+)
 python -c "import sys, sqlite3; sys.exit(sys.version_info < (3, 11))" >nul 2>&1
 if not errorlevel 1 (
     python app.py %*

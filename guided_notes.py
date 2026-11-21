@@ -163,6 +163,7 @@ def parse_grid(grid):
                 raise QuizError(400, "佔位符與題號表格不一致；請每題標記正確答案格，或全部使用原表頭定位。")
             for target, table_target in zip(targets, table_targets):
                 target["unit"] = table_target["unit"]
+                target["prompt"] = table_target["prompt"]
     else:
         headers = []
         for (row, col), value in grid.cells.items():
@@ -208,6 +209,8 @@ def parse_grid(grid):
                 raise QuizError(400, "子題標記缺少跨列題組題號。")
             targets.append({"question": question, "row": row, "col": span[1]})
         target_rows = {t["row"] for t in targets}
+        for target in targets:
+            target["prompt"] = grid.value(target["row"], contentcol).strip()
         for (r,c), value in grid.cells.items():
             if r > header and c == contentcol and value.strip() and r not in target_rows:
                 raise QuizError(400, "有題目列沒有獨立題號，可能是題組；請確認學習單。")

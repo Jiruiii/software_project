@@ -1,0 +1,48 @@
+# 測試與驗收
+
+在專案資料夾執行完整測試：
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+在已安裝 `requirements-firebase.txt` 的 Python 環境執行。瀏覽器驗收使用隔離資料庫與測試身分。
+
+- 帳號工作區、課程加入、密碼重設、排行榜、聊天與代碼複製：`python tests/run_extra_ui.py --suite courses`。
+- 多選題、完整吻合判分及草稿恢復：`python tests/run_extra_ui.py --suite multiple`。
+- 題型、不押及本組即時分數驗收：`python tests/run_extra_ui.py --suite question-types`。
+
+老師操作與桌面／手機截圖驗收：`python tests/run_extra_ui.py --suite teacher-ui`。
+
+額外功能的瀏覽器驗收：`python tests/run_extra_ui.py`（涵蓋逐題、下注、判分、重播、報告、斷線、題組、排行及倒數）。
+
+要測試多組同時搶答，可雙擊 `test-many-groups.cmd`，或執行：
+
+```powershell
+python tests/run_many_groups.py
+```
+
+會模擬 30 組、6 題、連續 3 輪，並核對老師與學生畫面。瀏覽器測試需要 Node.js、Chrome，以及可下載測試工具的網路；若只跑服務測試，可使用 `python tests/run_many_groups.py --http-only`。
+
+測試會使用獨立暫存資料，不影響正在使用的活動或 Google 試算表。中文結果位於 `output/playwright/many-groups-summary.txt`。
+
+## 真實 Google Sheets 驗收
+
+完成 Google 首次設定後，雙擊 `test-google-sheets.cmd`，或執行：
+
+```powershell
+python tests/run_live_sheets.py
+```
+
+1. 在自動開啟的瀏覽器完成 Google 授權；不需要先啟動主程式或輸入教師密碼。
+2. 工具會在該帳號建立一份「課間－自動驗收」試算表，複製官方範本並建立不同版面的測試工作表；只修改這份新建表，不改動官方範本或既有活動。
+3. 自動驗證匯入、兩組作答、原位寫回、純文字答案、格式保留、無人作答、重複寫回，以及來源移動後拒絕寫回。
+4. 結果位於 `output/live-sheets/report.json`，測試表連結位於 `output/live-sheets/test-workbook.txt`。測試表保留供人工查看，可自行刪除。
+
+這項測試會實際讀寫 Google，與前面的離線自動測試不同。授權最多等待 10 分鐘；每次執行需要重新授權，權杖只存於記憶體，結束後清除。測試表不會自動公開分享。
+
+## 驗收紀錄
+
+2026-11-22 發布前重新執行完整單元測試，127 項通過；`courses` 瀏覽器流程使用離線身分通過。OpenSpec 嚴格驗證通過 8 份主規格與 1 個進行中的變更。
+
+歷史測試資料保存在 [驗收證據目錄](evidence/README.md)。近期排行榜、學生公用頻道、可複製代碼的測試結果記在各自的 [OpenSpec 歸檔](../openspec/changes/archive/)。Firebase 真實帳號驗收的進度請見[帳號整合任務](../openspec/changes/firebase-course-accounts/tasks.md)。

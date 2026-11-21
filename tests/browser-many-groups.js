@@ -48,7 +48,7 @@ async (page) => {
   await page.waitForFunction(()=>document.querySelectorAll('#monitor-table tbody tr').length===30);
   await page.evaluate(()=>{
     document.querySelector('#start').addEventListener('click',()=>window.qaStartClick=Date.now(),{once:true});
-    document.querySelector('#end').addEventListener('click',()=>window.qaEndClick=Date.now(),{once:true});
+    document.querySelector('#confirm-end').addEventListener('click',()=>window.qaEndClick=Date.now(),{once:true});
     new MutationObserver(()=>{
       if(document.querySelectorAll('#monitor-table .cell-answer').length===180&&!window.qaAllAnswersAt)window.qaAllAnswersAt=Date.now();
     }).observe(document.querySelector('#monitor-table'),{childList:true,subtree:true});
@@ -100,7 +100,7 @@ async (page) => {
     check(state.answers.length===6,'student received other group answers');
   }
   await page.screenshot({path:'output/playwright/many-groups-teacher-active.png',fullPage:true});
-  await page.locator('#end').click();
+  await page.locator('#end').click(); await page.locator('#confirm-end').click();
   await Promise.all(students.map(s=>s.page.waitForFunction(()=>!!window.qaTimes.end,undefined,{timeout:3000})));
   const ended=await page.evaluate(()=>window.qaEndClick);
   const endSyncMs=Math.max(...await Promise.all(students.map(s=>s.page.evaluate(()=>window.qaTimes.end))))-ended;

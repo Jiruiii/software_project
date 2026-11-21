@@ -42,7 +42,7 @@ class BatchReviewTests(unittest.TestCase):
         self.s.review(self.t, self.aid, selected[1]['id'], 'incorrect')
         before = self.verdicts(), self.scores()
         result = self.s.review_batch(self.t, self.aid, '1', self.selections(), 'correct')
-        self.assertEqual([1, 2, 3], self.scores())
+        self.assertEqual([5, 4, 4], self.scores())
         self.s.undo_review_batch(self.t, self.aid, result['batch_id'])
         self.assertEqual(before, (self.verdicts(), self.scores()))
         with self.assertRaises(QuizError): self.s.undo_review_batch(self.t, self.aid, result['batch_id'])

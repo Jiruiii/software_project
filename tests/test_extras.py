@@ -39,8 +39,9 @@ class ExtraTests(unittest.TestCase):
         rows = list(csv.reader(io.StringIO(raw.decode("utf-8-sig"))))
         self.assertEqual("B", rows[1][2])
         self.assertEqual('\'=SUM(1,2)\n"中文"', rows[1][3])
-        self.assertEqual(["1", "是"], rows[1][-2:])
-        self.assertEqual(["2", "否"], rows[2][-2:])
+        self.assertEqual(["1", "是"], rows[1][7:9])
+        self.assertEqual(["2", "否"], rows[2][7:9])
+        self.assertEqual(["押注分","搶答分","單位合計"], rows[0][-3:])
         self.assertEqual("無人作答", rows[3][3])
 
     def test_e01_http_download(self):
@@ -59,28 +60,27 @@ class ExtraTests(unittest.TestCase):
         finally:
             server.shutdown(); thread.join(); server.server_close()
 
-    def test_e02_three_misses_priority_and_new_joiner(self):
-        self.s.configure(self.t, self.aid, "sequential", True)
-        with patch("quiz_extras.time.time", return_value=100):
-            self.s.transition(self.t, self.aid, "active")
-            for q in ("1", "2", "3"):
-                self.s.submit(self.u, self.aid, q, "first")
-                with self.assertRaises(QuizError): self.s.round_action(self.t, self.aid, "next")
-                self.s.round_action(self.t, self.aid, "close")
-                self.s.round_action(self.t, self.aid, "close")
-                self.s.round_action(self.t, self.aid, "next")
-            state = self.s.snapshot(self.v, self.aid)
-            self.assertTrue(state["round"]["own_priority"])
-            self.assertEqual(["4"], state["available_questions"])
-            self.assertNotIn("eligible_json", str(state))
-            late = self.s.join(self.a["code"], "new")["token"]
-            for student in (self.u, late):
-                with self.assertRaisesRegex(QuizError, "先答"): self.s.submit(student, self.aid, "4", "early")
-            self.s.submit(self.v, self.aid, "4", "priority")
-        with patch("quiz_extras.time.time", return_value=103):
-            self.s.submit(self.u, self.aid, "4", "later")
-            self.s.round_action(self.t, self.aid, "close")
-            self.assertEqual("results", self.s.snapshot(self.t, self.aid)["phase"])
+    def test_e02_lowest_and_time_boundary(self):
+        self.s.configure(self.t,self.aid,'sequential',True)
+        with patch('quiz_extras.time.time',return_value=100) as clock:
+            self.s.transition(self.t,self.aid,'active')
+            for token in (self.u,self.v):
+                self.assertTrue(self.s.snapshot(token,self.aid)['round']['own_priority'])
+            self.s.submit(self.u,self.aid,'1','A',3)
+            self.s.round_action(self.t,self.aid,'close')
+            row=self.s.snapshot(self.t,self.aid)['answers'][0]
+            self.s.review(self.t,self.aid,row['id'],'incorrect')
+            self.s.round_action(self.t,self.aid,'next')
+            self.assertTrue(self.s.snapshot(self.u,self.aid)['round']['own_priority'])
+            late=self.s.join(self.a['code'],'C')['token']
+            clock.return_value=102.999
+            for token in (self.v,late):
+                self.assertEqual([],self.s.snapshot(token,self.aid)['available_questions'])
+                with self.assertRaisesRegex(QuizError,'先答'): self.s.submit(token,self.aid,'2','early')
+            self.s.submit(self.u,self.aid,'2','priority')
+            clock.return_value=103
+            self.s.submit(self.v,self.aid,'2','normal')
+            self.s.submit(late,self.aid,'2','normal')
 
     def test_e02_settings_stage_and_round_gate(self):
         with self.assertRaises(QuizError): self.s.configure(self.u, self.aid, "sequential", True)
@@ -197,10 +197,10 @@ class ExtraTests(unittest.TestCase):
         self.assertEqual([1,1,1],[r['rank'] for r in state['scoreboard']])
         for aid in ids: self.s.review(self.t,self.aid,aid,'correct')
         state=self.s.snapshot(self.v,self.aid)
-        self.assertEqual([3,3,0],[r['score'] for r in state['scoreboard']])
-        self.assertEqual([1,1,3],[r['rank'] for r in state['scoreboard']])
+        self.assertEqual([7,5,0],[r['score'] for r in state['scoreboard']])
+        self.assertEqual([1,2,3],[r['rank'] for r in state['scoreboard']])
         self.s.review(self.t,self.aid,ids[0],'incorrect'); self.s.review(self.t,self.aid,ids[0],'incorrect')
-        self.assertEqual([3,0,-3],[r['score'] for r in self.s.snapshot(self.u,self.aid)['scoreboard']])
+        self.assertEqual([7,0,-3],[r['score'] for r in self.s.snapshot(self.u,self.aid)['scoreboard']])
 
     def test_e11_deadline_boundary_and_sequential_expiry(self):
         for invalid in (-1,3601,True,1.5,'3',None):
@@ -249,7 +249,7 @@ class ExtraTests(unittest.TestCase):
             service.transition(teacher, a["id"], "active"); service.submit(student, a["id"], "1", "preserve")
             service.close()
             db = sqlite3.connect(path)
-            db.executescript("DROP TABLE question_meta; DROP TABLE group_progress; DROP TABLE activity_options; ALTER TABLE answers DROP COLUMN stake; ALTER TABLE answers DROP COLUMN verdict;")
+            db.executescript("DROP TABLE question_meta; DROP TABLE activity_options; ALTER TABLE answers DROP COLUMN stake; ALTER TABLE answers DROP COLUMN verdict;")
             db.close()
             service = QuizService(path, "password")
             try:

@@ -6,7 +6,10 @@
   <title>課間｜課堂搶答</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
+  <script src="/share-code.js" defer></script>
+  <script src="/activity-chat.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/workspace.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -15,7 +18,7 @@
   </header>
   <main>
     <div id="notice" role="alert" hidden></div>
-    <section id="entry" class="entry-layout">
+    <section id="entry" class="entry-layout" hidden>
       <div class="intro">
         <span class="eyebrow">讓每一組的想法，都有回應</span>
         <h1>一起思考。<br>準備好，就搶答。</h1>
@@ -78,11 +81,16 @@
       <div class="section-heading"><div><span id="activity-eyebrow" class="eyebrow">CLASSROOM SESSION</span><h1 id="session-title"></h1><p id="session-subtitle" class="muted"></p></div><span id="role-badge" class="badge"></span></div>
       <div class="session-layout">
         <aside class="session-sidebar">
-          <div class="code-block"><span>活動代碼</span><strong id="session-code"></strong><p>讓同學在另一個分頁輸入此代碼。</p></div>
+          <div class="code-block" id="session-code-block"></div>
           <ol class="phase-steps" aria-label="活動階段"><li data-phase="preparing"><span>01</span><div>準備中<small>加入小組，準備作答</small></div></li><li data-phase="active"><span>02</span><div>作答中<small>思考答案，即時送出</small></div></li><li data-phase="results"><span>03</span><div>結果<small>看看每題的搶答成果</small></div></li></ol>
           <div id="teacher-controls" hidden><button id="save-settings" class="secondary">儲存設定</button><button id="start" class="primary">開始搶答 →</button><button id="end" class="danger" hidden>結束活動</button></div>
           <div id="round-controls" hidden><button id="close-round" class="danger wide">關閉本題</button><button id="next-round" class="primary wide">開啟下一題 →</button></div>
           <p id="session-rule" class="sidebar-note"></p>
+          <details id="live-ranking" class="live-ranking" open hidden>
+            <summary>本場前五名</summary>
+            <p id="live-ranking-hint"></p>
+            <ol id="live-ranking-rows" aria-label="本場小組排名"></ol>
+          </details>
           <div id="sheet-export-controls" class="sheet-sync-panel" hidden><div class="sheet-sync-heading"><strong id="source-name"></strong><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟學習單 ↗</a></div><div class="sheet-sync-feedback"><p id="sheet-sync-status" role="status"></p><button id="sheet-export" class="secondary" hidden>重試同步</button></div><details id="sheet-sync-help" class="inline-help"><summary>同步方式與連線說明</summary><p>關題後自動寫入最快未判錯組別；若指定老師答案，則優先使用老師答案。Google 尚未連線時，先返回活動清單連線。同步期間請勿移動原表列欄。</p></details></div>
         </aside>
         <div class="session-main">
@@ -92,19 +100,19 @@
           <p id="phase-help" class="muted"></p><div id="grading-status" class="grading-status" hidden><p id="grading-message" role="status"></p><button id="grading-review" class="secondary" hidden>前往批改</button></div>
           <p id="round-status" class="integration-note" hidden></p>
           <p id="countdown" class="integration-note" hidden></p>
-          <section id="own-score" class="score-card" aria-live="polite" hidden><span>本組目前總分</span><strong id="own-score-total">0 分</strong><p id="own-score-pending"></p><small>本場累計 · 待批改暫不計分</small></section>
+          <section id="own-score" class="score-card" aria-live="polite" hidden><span>本組目前總分</span><strong id="own-score-total">0 分</strong><p id="own-score-pending"></p><small id="own-score-parts"></small><small id="speed-rule"></small></section>
           <form id="settings-form" class="panel" hidden>
             <h3>怎麼進行這場搶答？</h3><label for="quiz-mode">開放方式</label>
             <select id="quiz-mode"><option value="all">全題同時開放</option><option value="sequential">逐題搶答</option></select>
             <p id="mode-help" class="field-hint"></p>
-            <label id="fairness-field" class="check-label" hidden><input id="quiz-fairness" type="checkbox">保底先答：連續 3 題未成功，下題先答 3 秒</label>
+            <label id="fairness-field" class="check-label" hidden><input id="quiz-fairness" type="checkbox">保底先答：每題開放時，總分並列最低的小組都可先答 3 秒</label>
             <label for="quiz-duration">作答時間（秒）</label><input id="quiz-duration" type="number" min="0" max="3600" step="1" value="0" required>
             <p class="field-hint">填 0 表示不限時。逐題模式會每題重新倒數，含保底先答時間。</p>
             <div class="form-actions"><button id="go-questions" class="primary" type="button">下一步：題目與計分 →</button></div>
           </form>
-          <section id="question-settings" class="panel" hidden><h3>題型與下注</h3><p class="field-hint">每題可選簡答或單選，並獨立決定是否開放下注。單選自動批改每組，簡答由老師批改；開始後不能修改。題組共用一次下注。</p><div id="question-settings-forms"></div></section>
+          <section id="question-settings" class="panel" hidden><h3>題目、題型與下注</h3><p class="field-hint">填入要讓學生閱讀的題目，或從學習單匯入。簡答由老師批改，單選與多選自動批改；題組共用一次下注。開始後不能修改。</p><div id="question-settings-forms"></div></section>
           <div id="results" hidden></div>
-          <section id="scoreboard" class="panel" hidden><h3>小組得分排行</h3><details class="inline-help scoring-help"><summary>計分方式</summary><p>不押為 0 分；答對加下注分、答錯扣下注分，待批改暫不計分。題組全部答對才加分，任一子題答錯即扣分，每題組只計一次；同分同名次。</p></details><div id="scoreboard-table" class="table-scroll"></div></section>
+          <section id="scoreboard" class="panel" hidden><h3>小組得分排行</h3><details class="inline-help scoring-help"><summary>計分方式</summary><p id="ranking-rule"></p></details><div id="scoreboard-table" class="table-scroll"></div></section>
           <details id="references" class="panel teacher-reference" hidden><summary id="reference-summary">老師正確答案（選填）</summary><p class="field-hint">儲存後學生立即可見，並保留於報告；不影響判分。</p><p id="reference-selection-help" class="field-hint" hidden></p><form id="reference-form"><label for="reference-answer">老師正確答案</label><textarea id="reference-answer" maxlength="2000" rows="3" placeholder="需要補充時再填寫，最多 2000 字"></textarea><label id="reference-override-field" class="check-label"><input id="reference-override" type="checkbox">用老師答案更新學習單</label><p id="reference-sheet-help" class="field-hint"></p><div class="form-actions"><button id="reference-save" class="primary">儲存老師答案</button><span id="reference-status" class="field-hint" role="status"></span></div></form></details>
           <section id="group-report" class="panel" hidden><h3>本組學習報告</h3><p class="field-hint">題組得分只列於第一小題。</p><div id="report-table" class="table-scroll"></div><button id="download-report" class="primary">下載本組報告 CSV</button></section>
           <button id="download-csv" class="primary" hidden>下載活動 CSV</button>
@@ -130,6 +138,25 @@
       </div>
     </section>
   </main>
+  <details id="activity-chat" class="activity-chat" hidden>
+    <summary>公用頻道</summary>
+    <div class="chat-panel">
+      <p class="chat-context">本場學生可見，搶答結束後清除。</p>
+      <div id="chat-log" role="log" aria-label="本場討論" tabindex="0"></div>
+      <p id="chat-read-status" class="chat-context" role="status"></p>
+      <form id="chat-form">
+        <label for="chat-body" id="chat-author">訊息</label>
+        <input id="chat-body" type="text" maxlength="500" autocomplete="off" required placeholder="輸入訊息…">
+        <button class="primary" type="submit">送出</button>
+      </form>
+      <p id="chat-send-status" role="status"></p>
+    </div>
+  </details>
+  <dialog id="end-dialog" aria-labelledby="end-title" aria-describedby="end-message">
+    <h2 id="end-title">結束這場搶答？</h2>
+    <p id="end-message">結束後將停止收件並清除本場公用頻道的訊息。老師與助教仍可批改或更正判定。</p>
+    <form method="dialog" class="form-actions"><button class="secondary" autofocus value="cancel">返回搶答</button><button class="danger" id="confirm-end" value="end">確認結束</button></form>
+  </dialog>
   <footer class="site-footer"><span>課間 · 讓課堂多一點參與</span><span>本機課堂搶答系統</span></footer>
 </body>
 </html>

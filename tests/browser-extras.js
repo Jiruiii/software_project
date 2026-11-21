@@ -20,7 +20,8 @@ async (page) => {
   stage='line 12';
   await page.locator('#quiz-mode').selectOption('sequential');
   stage='line 13';
-  await page.locator('#quiz-fairness').check();
+  check(await page.locator('#quiz-fairness').isChecked(),'逐題模式應預設啟用最低分先答');
+  check((await page.locator('#fairness-field').innerText()).includes('總分並列最低'),'缺少最低分保底說明');
   stage='line 14';
   await page.locator('#save-settings').click();
   stage='line 15';
@@ -180,15 +181,15 @@ async (page) => {
   stage='line 92';
   await page.waitForFunction(()=>current.answers.length===2);
   stage='line 93';
-  await page.locator('#end').click(); await student.locator('#group-report').waitFor({state:'visible'});
+  await page.locator('#end').click(); await page.locator('#confirm-end').click(); await student.locator('#group-report').waitFor({state:'visible'});
   await page.locator('#teacher-tabs [data-view="monitor"]').click();
   stage='line 94';
   await page.getByRole('button',{name:'題組學生 第 1.1 題判為正確',exact:true}).click();
   stage='line 95';
   await page.getByRole('button',{name:'題組學生 第 1.2 題判為正確',exact:true}).click();
   stage='line 96';
-  await student.waitForFunction(()=>current.report[0].points===2 && current.report[1].points===null);
-  await student.waitForFunction(()=>current.scoreboard[0].score===2);
+  await student.waitForFunction(()=>current.report[0].points===6 && current.report[1].points===null);
+  await student.waitForFunction(()=>current.scoreboard[0].score===6);
   check((await student.locator('#scoreboard-table').innerText()).includes('題組學生'),'scoreboard absent');
   stage='line 97';
   await page.screenshot({path:'output/playwright/extras-grouped-teacher.png',fullPage:true});

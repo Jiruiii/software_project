@@ -47,7 +47,7 @@ async (page) => {
     await student.waitForFunction(()=>current.own_score.awaiting_close_units===1); await page.waitForFunction(()=>current.answers.length===1);
     check(await student.evaluate(()=>current.own_score.total===0),'score published before close');
     check(await page.locator('#teacher-monitor').isVisible(),'active default not monitor');
-    await page.locator('#close-round').click(); await student.waitForFunction(()=>current.own_score.total===2); await page.locator('#next-round').click(); await student.waitForFunction(()=>!document.querySelector('#answer-1').disabled);
+    await page.locator('#close-round').click(); await student.waitForFunction(()=>current.own_score.total===6); await page.locator('#next-round').click(); await student.waitForFunction(()=>!document.querySelector('#answer-1').disabled);
     await student.locator('#answer-1').fill('植物利用光能進行光合作用。'+ 'LongAnswer'.repeat(70)); await student.locator('.question-card').nth(1).locator('button').click();
     await page.waitForFunction(()=>current.answers.length===2); await page.locator('#close-round').click();
     check(await page.locator('#monitor-question').inputValue()==='2','sequential monitor not following');
@@ -55,8 +55,8 @@ async (page) => {
     await page.locator('#monitor-question').selectOption('1'); await tab('tools'); await tab('monitor');
     check(await page.locator('#monitor-question').inputValue()==='1','filter lost across tabs');
     await page.locator('#monitor-question').selectOption('2'); await page.getByRole('button',{name:'第一組_ABCDEFGHIJKLMNOPQRSTUVWXYZ 第 2 題判為正確',exact:true}).click();
-    await student.waitForFunction(()=>current.own_score.pending_units===0); check(await student.evaluate(()=>current.own_score.total===2),'zero bet changed score');
-    await page.locator('#end').click(); await page.locator('#results').waitFor({state:'visible'});
+    await student.waitForFunction(()=>current.own_score.pending_units===0); check(await student.evaluate(()=>current.own_score.total===10),'Missing unbet speed bonus');
+    await page.locator('#end').click(); await page.locator('#confirm-end').click(); await page.locator('#results').waitFor({state:'visible'});
     await page.locator('#results .full-answer summary').click(); check((await page.locator('#results .full-answer p').innerText()).includes('LongAnswer'.repeat(70)),'full answer lost');
     await page.locator('#results .full-answer summary').click(); await capture('results-desktop');
     check(await page.locator('#teacher-monitor').isHidden(),'results stacked with monitor');

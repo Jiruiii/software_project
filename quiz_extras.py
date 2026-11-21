@@ -40,16 +40,42 @@ class ExtraFeatures:
                     self.db.execute("UPDATE activities SET phase='results',ended_at=(SELECT deadline FROM activity_options WHERE activity_id=?) WHERE id=?", (row['id'],row['id']))
                     self.db.execute('UPDATE activity_options SET deadline=NULL WHERE activity_id=?', (row['id'],))
 
-    def _scoreboard(self, aid):
-        units = self._units(aid)
-        answers = {}
-        for row in self.db.execute('SELECT * FROM answers WHERE activity_id=? ORDER BY id', (aid,)):
-            answers.setdefault(row['group_id'], {})[row['question_id']] = dict(row)
+    def _published_points(self, state, units, options):
+        published = list(units)
+        if state['phase'] != 'results':
+            if state['phase'] != 'active' or options['mode'] != 'sequential': return {}
+            published = published[:options['round_index'] + (0 if options['round_open'] else 1)]
+        if not published: return {}
+        by_question = {q:unit for unit in published for q in units[unit]}
+        submissions = {unit:{} for unit in published}
+        for row in self.db.execute('SELECT id,question_id,group_id,stake,verdict FROM answers WHERE activity_id=? ORDER BY id', (state['id'],)):
+            unit = by_question.get(row['question_id'])
+            if unit is not None: submissions[unit].setdefault(row['group_id'], []).append(row)
+        points = {}
+        for unit, groups in submissions.items():
+            place = 0
+            for group, rows in sorted(groups.items(),key=lambda item:item[1][-1]['id']):
+                wager = self._unit_points(rows, units[unit])
+                speed = 0
+                if options['speed_scoring'] and len(rows)==len(units[unit]) and all(r['verdict']=='correct' for r in rows):
+                    if place < 3: speed = (4,2,1)[place]
+                    place += 1
+                points.setdefault(group,{})[unit] = {'wager':wager,'speed':speed,'total':wager+speed}
+        return points
+
+    @staticmethod
+    def _sum_points(points):
+        return {key:sum(row[key] for row in points.values()) for key in ('wager','speed','total')}
+
+    def _scoreboard(self, aid, points):
         scores = []
         for group in self.db.execute('SELECT id,name FROM groups WHERE activity_id=?', (aid,)):
-            own=answers.get(group['id'], {})
-            score=sum(self._unit_points([own[q] for q in qs if q in own], qs) for qs in units.values())
-            scores.append({'group_name':group['name'], 'score':score})
+            parts=self._sum_points(points.get(group['id'],{}))
+            scores.append({'group_name':group['name'], 'score':parts['total'], 'wager':parts['wager'], 'speed':parts['speed']})
+        return self._rank_scores(scores)
+
+    @staticmethod
+    def _rank_scores(scores):
         scores.sort(key=lambda row:(-row['score'],row['group_name'].casefold(),row['group_name']))
         last_score,rank=None,0
         for i,row in enumerate(scores,1):
@@ -66,9 +92,8 @@ class ExtraFeatures:
             questions = self._units(aid)[unit]
             if not isinstance(answers, dict) or set(answers) != set(questions):
                 raise QuizError(400, "請一次填齊此題組的所有子題，不能增加或缺少題號。")
-            clean = {q:text(answers[q], "答案", 2000) for q in questions}
             received = time.time()
-            return {"answers":[self.submit(token, aid, q, clean[q], stake, _bundle=True, _commit=False, _received=received) for q in questions]}
+            return {"answers":[self.submit(token, aid, q, answers[q], stake, _bundle=True, _commit=False, _received=received) for q in questions]}
 
     @staticmethod
     def _unit_points(answers, questions):
@@ -77,15 +102,14 @@ class ExtraFeatures:
         if all(a["verdict"] == "correct" for a in answers): return answers[0]["stake"]
         return 0
 
-    def _own_score(self, answers, units):
+    def _own_score(self, answers, units, total):
         lookup={a['question_id']:a for a in answers}
-        total, pending, awaiting=0,0,0
+        pending, awaiting=0,0
         for qs in units.values():
             own=[lookup[q] for q in qs if q in lookup]
             if any(a['verdict']=='withheld' for a in own):
                 awaiting += 1
                 continue
-            total += self._unit_points(own,qs)
             if own and not any(a['verdict']=='incorrect' for a in own) and any(a['verdict']=='pending' for a in own):
                 pending += 1
         return {'total':total,'pending_units':pending,'awaiting_close_units':awaiting}
@@ -116,12 +140,13 @@ class ExtraFeatures:
         rows = []
         for unit in state["units"]:
             qs = unit["questions"]
-            points = self._unit_points([answers[q] for q in qs if q in answers], qs)
+            parts = (answers.get(qs[0]) or {}).get('points',{'wager':0,'speed':0,'total':0})
             for index, q in enumerate(qs):
                 answer = answers.get(q)
                 rows.append({"question":q, "unit":unit["id"], "answer":answer["text"] if answer else "未作答",
                              "verdict":answer["verdict"] if answer else "unanswered", "stake":answer["stake"] if answer else None,
-                             "points":points if index == 0 else None,
+                             "points":parts['total'] if index == 0 else None,
+                             "wager":parts['wager'] if index == 0 else None, "speed":parts['speed'] if index == 0 else None,
                              "successful":bool(winners[q] and winners[q]["group_name"] == state["group_name"]),
                              "reference":state["references"][q]})
         return rows
@@ -137,6 +162,8 @@ class ExtraFeatures:
             rows.extend([[state["title"], state["group_name"], r["question"], r["unit"], r["answer"], names[r["verdict"]], r["stake"], r["points"], "是" if r["successful"] else "否", r["reference"]] for r in state["report"]])
             rows[0].append('成績狀態')
             for row in rows[1:]: row.append('批改完成' if state['grading']['complete'] else '暫時成績')
+            rows[0].extend(['押注分','搶答分'])
+            for row, detail in zip(rows[1:],state['report']): row.extend([detail['wager'],detail['speed']])
             return csv_bytes(rows)
 
     def clusters(self, token, aid, question):
@@ -182,20 +209,14 @@ class ExtraFeatures:
                 reference_answer TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY(activity_id,question_id),
                 FOREIGN KEY(activity_id,question_id) REFERENCES questions(activity_id,id));
-            CREATE TABLE IF NOT EXISTS group_progress (
-                group_id TEXT PRIMARY KEY REFERENCES groups(id), misses INTEGER NOT NULL DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS fairness_baselines (
-                activity_id TEXT PRIMARY KEY REFERENCES activities(id), counts_json TEXT NOT NULL,
-                legacy INTEGER NOT NULL DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS fairness_rounds (
-                activity_id TEXT REFERENCES activities(id), round_index INTEGER,
-                participants_json TEXT NOT NULL, consumed_json TEXT NOT NULL,
-                closed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(activity_id,round_index));
             INSERT OR IGNORE INTO activity_options(activity_id) SELECT id FROM activities;
             INSERT OR IGNORE INTO question_meta(activity_id,question_id,unit_id)
                 SELECT activity_id,id,id FROM questions;
         """)
         columns = {r["name"] for r in self.db.execute("PRAGMA table_info(answers)")}
+        if 'speed_scoring' not in {r['name'] for r in self.db.execute('PRAGMA table_info(activity_options)')}:
+            self.db.execute('ALTER TABLE activity_options ADD COLUMN speed_scoring INTEGER NOT NULL DEFAULT 1')
+            self.db.execute("UPDATE activity_options SET speed_scoring=0 WHERE activity_id IN (SELECT id FROM activities WHERE phase!='preparing')")
         if "stake" not in columns:
             self.db.execute("ALTER TABLE answers ADD COLUMN stake INTEGER NOT NULL DEFAULT 1")
         if "verdict" not in columns:
@@ -206,21 +227,15 @@ class ExtraFeatures:
             self.db.execute("ALTER TABLE answers ADD COLUMN elapsed_basis TEXT NOT NULL DEFAULT 'activity'")
         columns = {r['name'] for r in self.db.execute('PRAGMA table_info(question_meta)')}
         for name, definition in [('question_type', "TEXT NOT NULL DEFAULT 'short'"),
+                                 ('prompt', "TEXT NOT NULL DEFAULT ''"),
                                  ('options_json', "TEXT NOT NULL DEFAULT '[]'"),
                                  ('correct_index', 'INTEGER'),
+                                 ('correct_indices', "TEXT NOT NULL DEFAULT '[]'"),
                                  ('betting_enabled', 'INTEGER NOT NULL DEFAULT 1'), ('opened_at', 'REAL'),
                                  ('reference_override', 'INTEGER NOT NULL DEFAULT 0')]:
             if name not in columns:
                 self.db.execute(f'ALTER TABLE question_meta ADD COLUMN {name} {definition}')
         self._migrate_answer_timing()
-        for a in self.db.execute('SELECT a.id,a.started_at,o.* FROM activities a JOIN activity_options o ON o.activity_id=a.id').fetchall():
-            if self.db.execute('SELECT 1 FROM fairness_baselines WHERE activity_id=?',(a['id'],)).fetchone(): continue
-            legacy = a['started_at'] is not None and a['mode']=='sequential'
-            counts={r['id']:r['misses'] for r in self.db.execute('SELECT g.id,COALESCE(p.misses,0) AS misses FROM groups g LEFT JOIN group_progress p ON p.group_id=g.id WHERE g.activity_id=?',(a['id'],))} if legacy else {}
-            self.db.execute('INSERT INTO fairness_baselines VALUES(?,?,?)',(a['id'],json.dumps(counts),int(legacy)))
-            if legacy and a['round_open']:
-                # Existing counters already consumed this round's priority.
-                self.db.execute('INSERT INTO fairness_rounds VALUES(?,?,?,?,0)',(a['id'],a['round_index'],a['participants_json'],'[]'))
         self.db.commit()
 
     def _migrate_answer_timing(self):
@@ -254,31 +269,49 @@ class ExtraFeatures:
                 if not isinstance(item, dict) or not isinstance(item.get('question'), str):
                     raise QuizError(400, '題目設定格式不正確。')
                 q, kind = item['question'], item.get('type')
-                if q not in units[unit] or q in clean or kind not in ('short', 'choice'):
+                if q not in units[unit] or q in clean or kind not in ('short', 'choice', 'multiple'):
                     raise QuizError(400, '題號重複、不屬於此題組或題型無效。')
-                options, correct = [], None
-                if kind == 'choice':
-                    options, correct = item.get('options'), item.get('correct_index')
+                options, correct, indices = [], None, []
+                if kind != 'short':
+                    options = item.get('options')
                     if not isinstance(options, list) or not 2 <= len(options) <= 8:
-                        raise QuizError(400, '單選題需要 2～8 個選項。')
+                        raise QuizError(400, '選擇題需要 2～8 個選項。')
                     options = [text(option, '選項', 200) for option in options]
                     if len(set(options)) != len(options): raise QuizError(400, '選項不能重複。')
-                    if type(correct) is not int or not 0 <= correct < len(options):
-                        raise QuizError(400, '請指定一個有效的正確選項。')
-                clean[q] = (kind, json.dumps(options, ensure_ascii=False), correct, int(betting_enabled), aid, q)
-            self.db.executemany('UPDATE question_meta SET question_type=?,options_json=?,correct_index=?,betting_enabled=? WHERE activity_id=? AND question_id=?', clean.values())
+                    if kind == 'multiple':
+                        indices = item.get('correct_indices')
+                        if any(len(option.splitlines()) != 1 for option in options):
+                            raise QuizError(400, '多選題的每個選項只能有一行。')
+                        if not isinstance(indices, list) or not 1 <= len(indices) <= len(options) or any(type(i) is not int or not 0 <= i < len(options) for i in indices) or len(set(indices)) != len(indices):
+                            raise QuizError(400, '請指定至少一個不重複的有效正解。')
+                    else:
+                        correct = item.get('correct_index')
+                        if type(correct) is not int or not 0 <= correct < len(options):
+                            raise QuizError(400, '請指定一個有效的正確選項。')
+                prompt = item.get('prompt')
+                if 'prompt' in item and not isinstance(prompt, str):
+                    raise QuizError(400, '題目內容必須是文字。')
+                clean[q] = (kind, json.dumps(options, ensure_ascii=False), correct, json.dumps(indices), int(betting_enabled), prompt.strip() if prompt is not None else None, aid, q)
+            self.db.executemany('UPDATE question_meta SET question_type=?,options_json=?,correct_index=?,correct_indices=?,betting_enabled=?,prompt=COALESCE(?,prompt) WHERE activity_id=? AND question_id=?', clean.values())
             return {'ok': True}
 
-    def _answer_verdict(self, aid, question, answer, stake):
-        from quiz_service import QuizError
+    def _grade_submission(self, aid, question, answer, stake):
+        from quiz_service import QuizError, text
         config=self.db.execute('SELECT * FROM question_meta WHERE activity_id=? AND question_id=?',(aid,question)).fetchone()
         if not config: raise QuizError(404, '題號不存在。')
         if not config['betting_enabled'] and stake != 0:
             raise QuizError(400, '這題未開放下注，請選擇不押。')
-        if config['question_type'] == 'short': return 'pending'
         options=json.loads(config['options_json'])
+        if config['question_type'] == 'multiple':
+            if not isinstance(answer, list) or not 1 <= len(answer) <= len(options) or any(item not in options for item in answer) or len(set(answer)) != len(answer):
+                raise QuizError(400, '請至少勾選一項，且只能送出不重複的有效選項。')
+            selected = [i for i, option in enumerate(options) if option in answer]
+            verdict = 'correct' if selected == sorted(json.loads(config['correct_indices'])) else 'incorrect'
+            return '\n'.join(options[i] for i in selected), verdict
+        answer = text(answer, '答案', 2000)
+        if config['question_type'] == 'short': return answer, 'pending'
         if answer not in options: raise QuizError(400, '請選擇題目提供的有效選項。')
-        return 'correct' if answer == options[config['correct_index']] else 'incorrect'
+        return answer, 'correct' if answer == options[config['correct_index']] else 'incorrect'
 
     def _winner_rows(self, aid):
         """Earliest complete unit not disqualified; one group wins every child."""
@@ -303,7 +336,7 @@ class ExtraFeatures:
         return any(question in qs and (i < options["round_index"] or (i == options["round_index"] and not options["round_open"])) for i, qs in enumerate(units))
 
     @expire_first
-    def review(self, token, aid, answer_id, verdict):
+    def review(self, token, aid, answer_id, verdict, revision=None):
         from quiz_service import QuizError
         with self.lock, self.db:
             self._auth(token, "teacher")
@@ -312,14 +345,22 @@ class ExtraFeatures:
                 raise QuizError(400, "請提供有效答案與判定。")
             answer = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND id=?", (aid, answer_id)).fetchone()
             if not answer: raise QuizError(404, "找不到這筆答案。")
+            if self.courses and (type(revision) is not int or revision != answer['review_revision']):
+                raise QuizError(409, '批改版本已變更，請重新查看後再判定。')
             if not self._reviewable(activity, answer["question_id"]):
                 raise QuizError(409, "請先關閉此題或結束活動，再判定答案。")
             self.db.execute("UPDATE answers SET verdict=?,review_revision=review_revision+1 WHERE id=?", (verdict, answer_id))
+            self._log_grades(token, [answer_id])
             self._invalidate_sheet_export(aid)
             return {"ok": True}
 
+    def _log_grades(self, token, ids):
+        if self.courses:
+            uid = self.courses.scope(token)['uid']
+            self.db.executemany('INSERT INTO grade_log SELECT id,review_revision,?,verdict,? FROM answers WHERE id=?',
+                                [(uid, time.time(), answer_id) for answer_id in ids])
+
     def _invalidate_sheet_export(self, aid):
-        self._recompute_fairness(aid)
         row = self.db.execute('SELECT source_json FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone()
         if not row: return
         source = json.loads(row['source_json'])
@@ -370,6 +411,7 @@ class ExtraFeatures:
             self.db.executemany("UPDATE answers SET verdict=?,review_revision=? WHERE id=?",
                                 [(verdict, c["revision"], c["id"]) for c in changes])
             batch_id = secrets.token_hex(16)
+            self._log_grades(token, [c['id'] for c in changes])
             self.db.execute("INSERT INTO review_batches(id,activity_id,owner,changes_json) VALUES(?,?,?,?)",
                             (batch_id, aid, owner, json.dumps(changes)))
             self._invalidate_sheet_export(aid)
@@ -396,6 +438,7 @@ class ExtraFeatures:
             self.db.executemany("UPDATE answers SET verdict=?,review_revision=review_revision+1 WHERE id=?",
                                 [(c["before"], c["id"]) for c in changes])
             self.db.execute("UPDATE review_batches SET undone=1 WHERE id=?", (batch_id,))
+            self._log_grades(token, [c['id'] for c in changes])
             self._invalidate_sheet_export(aid)
             return {"ok":True, "count":len(changes)}
 
@@ -428,20 +471,17 @@ class ExtraFeatures:
             return {"ok": True}
 
     def _open_round(self, aid, index):
-        self._recompute_fairness(aid)
         options = self._options(aid)
         participants = [r["id"] for r in self.db.execute("SELECT id FROM groups WHERE activity_id=?", (aid,))]
+        units = self._units(aid)
         eligible = []
-        if options["fairness"]:
-            for gid in participants:
-                row = self.db.execute("SELECT misses FROM group_progress WHERE group_id=?", (gid,)).fetchone()
-                if row and row["misses"] >= 3:
-                    eligible.append(gid)
-        self.db.execute('INSERT OR IGNORE INTO fairness_baselines VALUES(?,?,0)',(aid,'{}'))
-        self.db.execute('INSERT INTO fairness_rounds VALUES(?,?,?,?,0)',(aid,index,json.dumps(participants),json.dumps(eligible)))
-        self._recompute_fairness(aid)
+        if options["fairness"] and participants:
+            points = self._published_points(self._activity(aid), units, options)
+            totals = {gid:self._sum_points(points.get(gid, {}))["total"] for gid in participants}
+            minimum = min(totals.values())
+            eligible = [gid for gid in participants if totals[gid] == minimum]
         now = time.time()
-        questions = list(self._units(aid).values())[index]
+        questions = list(units.values())[index]
         self.db.executemany('UPDATE question_meta SET opened_at=? WHERE activity_id=? AND question_id=?',
                             [(now, aid, q) for q in questions])
         self.db.execute("UPDATE activity_options SET round_index=?,round_open=1,round_started_at=?,priority_until=?,eligible_json=?,participants_json=? WHERE activity_id=?",
@@ -453,23 +493,10 @@ class ExtraFeatures:
         if not options["round_open"]:
             return
         units = list(self._units(aid).values())
-        self.db.execute('UPDATE fairness_rounds SET closed=1 WHERE activity_id=? AND round_index=?',(aid,options['round_index']))
-        self._recompute_fairness(aid)
         self.db.execute("UPDATE activity_options SET round_open=0,deadline=NULL WHERE activity_id=?", (aid,))
         if options["round_index"] == len(units)-1:
             self.db.execute("UPDATE activities SET phase='results',ended_at=? WHERE id=?", (time.time(), aid))
 
-    def _recompute_fairness(self, aid):
-        baseline=self.db.execute('SELECT counts_json FROM fairness_baselines WHERE activity_id=?',(aid,)).fetchone()
-        counts=json.loads(baseline['counts_json']) if baseline else {}
-        units=list(self._units(aid).values()); winners=self._winner_rows(aid)
-        for row in self.db.execute('SELECT * FROM fairness_rounds WHERE activity_id=? ORDER BY round_index',(aid,)):
-            for gid in json.loads(row['consumed_json']): counts[gid]=0
-            if not row['closed']: continue
-            first=winners.get(units[row['round_index']][0]); winner=first['group_id'] if first else None
-            for gid in json.loads(row['participants_json']):
-                counts[gid]=0 if gid==winner else counts.get(gid,0)+1
-        self.db.executemany('INSERT INTO group_progress(group_id,misses) VALUES(?,?) ON CONFLICT(group_id) DO UPDATE SET misses=excluded.misses',counts.items())
 
     @expire_first
     def round_action(self, token, aid, action):
@@ -506,14 +533,30 @@ class ExtraFeatures:
         for row in self.db.execute('SELECT * FROM question_meta WHERE activity_id=?', (state['id'],)):
             config={'type':row['question_type'], 'options':json.loads(row['options_json']), 'betting_enabled':bool(row['betting_enabled'])}
             if session['role'] == 'teacher': config['correct_index'] = row['correct_index']
+            if session['role'] == 'teacher' and row['question_type'] == 'multiple':
+                config['correct_indices'] = json.loads(row['correct_indices'])
+            if session['role'] == 'teacher' or row['opened_at'] is not None:
+                config['prompt'] = row['prompt']
             state['question_settings'][row['question_id']] = config
         options = self._options(state["id"])
         units = self._units(state["id"])
         state["units"] = [{"id": u, "questions": qs} for u, qs in units.items()]
-        if session['role'] == 'student': state['own_score'] = self._own_score(state['answers'],units)
+        points = self._published_points(state,units,options)
+        first = {qs[0]:unit for unit,qs in units.items()}
+        for answer in state['answers']:
+            detail = points.get(answer.get('group_id',session['group_id']),{}).get(first.get(answer['question_id']))
+            if detail is not None: answer['points'] = detail
+        state['speed_scoring'] = bool(options['speed_scoring'])
+        if session['role'] == 'student':
+            state['own_points'] = self._sum_points(points.get(session['group_id'],{}))
+            state['own_score'] = self._own_score(state['answers'],units,state['own_points']['total'])
+            state['chat_available'] = state['phase'] == 'active' and self.chat_student(session)
+        if state['phase'] == 'active':
+            state['top_five'] = [
+                {key: row[key] for key in ('rank', 'group_name', 'score')}
+                for row in self._scoreboard(state['id'], points)[:5]
+            ]
         state["settings"] = {k: options[k] for k in ("mode", "fairness", "duration_seconds")}
-        baseline=self.db.execute('SELECT legacy FROM fairness_baselines WHERE activity_id=?',(state['id'],)).fetchone()
-        state['settings']['legacy_fairness']=bool(baseline and baseline['legacy'] and options['fairness'])
         state["server_time"] = time.time()
         state["round"] = {k: options[k] for k in ("round_index", "round_open", "round_started_at", "priority_until", "deadline")}
         state["round"]["unit_id"] = list(units)[options["round_index"]] if options["round_index"] >= 0 else None
@@ -533,7 +576,7 @@ class ExtraFeatures:
         if state["phase"] == "results":
             pending=self.db.execute("SELECT COUNT(*) FROM answers WHERE activity_id=? AND verdict='pending'",(state['id'],)).fetchone()[0]
             state['grading']={'pending_answers':pending,'complete':pending==0}
-            state["scoreboard"] = self._scoreboard(state['id'])
+            state["scoreboard"] = self._scoreboard(state['id'],points)
             if session["role"] == "student": state["report"] = self._report(state)
         return state
 
@@ -558,4 +601,9 @@ class ExtraFeatures:
                                  "該題開放" if answer['elapsed_basis'] == 'question' else "活動開始（舊紀錄）",
                                  f"{answer['elapsed_ms']/1000:.3f}", rank,
                                  "是" if winner and winner["group_name"] == answer["group_name"] else "否"])
+            details={(a['question_id'],a['group_name']):a.get('points') for a in state['answers']}
+            rows[0].extend(['押注分','搶答分','單位合計'])
+            for row in rows[1:]:
+                parts = details.get((row[0],row[2])) or {}
+                row.extend(parts.get(key) for key in ('wager','speed','total'))
             return csv_bytes(rows)
