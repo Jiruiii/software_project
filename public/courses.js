@@ -27,6 +27,12 @@ function button(parent, title, fn, cls='secondary') {
   b.type = 'button';
   b.onclick = () => run(b,fn);
   parent.append(b);
+  return b;
+}
+function listEntry(parent, title, detail, open, phaseName) {
+  const row = button(parent,'',open,'activity-card course-row');
+  row.setAttribute('aria-label',title+' · '+detail);
+  row.append(node('strong',title),node('span',detail,phaseName ? 'phase-pill '+phaseName : 'row-detail'));
 }
 function panel(title) {
   const section = node('section',undefined,'panel');
@@ -70,7 +76,7 @@ function draw() {
   $('login-roles').hidden = !authReady || !!auth?.currentUser;
   $('student').setAttribute('aria-pressed',String(!staff));
   $('staff').setAttribute('aria-pressed',String(staff));
-  $('title').textContent = home ? (staff ? '我的課程' : '我的小組') : (authReady && !auth?.currentUser?'進入課堂':'課堂搶答');
+  $('title').textContent = home ? (staff ? '我的課程' : '我的小組') : '進入課堂';
   $('login').hidden = $('login-roles').hidden;
   const view=location.hash.slice(1) || 'home';
   const [page,id,task]=view.split('/');
@@ -82,7 +88,7 @@ function draw() {
     staff,teacher:home?.teacher,admin:home?.admin,courseId:selected?.id,courseTitle:selected?.title,owner:!!selected && owner
   },navigate);
   $('intro').textContent = staff ? '登入教學工作區' : '登入你的小組';
-  $('hint').textContent = staff ? '登入後可建立課程，或進入受邀協助批改的課程。' : '使用自己的 Google 帳號登入，再加入或建立課程小組。';
+  $('hint').textContent = staff ? '建立自己的課程，或進入受邀協助批改的課程。' : '用自己的 Google 帳號加入或建立課程小組。';
   if (!home) return;
   window.courseNav.select(view);
   if(selected) {
@@ -133,8 +139,21 @@ function draw() {
   if(view!=='home') history.replaceState(null,'','#home');
   window.courseNav.select('home');
   const list=panel();
-  if(!courses.length) list.append(node('p',staff?(home.teacher?'還沒有課程。從右側目錄選「新增課程」即可建立。':'目前沒有授課或受邀的課程。'):'目前尚未加入小組。從右側目錄選「加入小組」或「建立小組」。','muted'));
-  for(const c of courses) button(list,c.title+' · '+(staff?(c.owner===home.uid?'授課教師':'助教'):c.name),()=>navigate('course/'+c.id),'activity-card');
+  list.classList.add('course-index');
+  const head=node('div',undefined,'index-heading');
+  head.append(node('h2',staff?'課程清單':'已加入的課程'),node('span',courses.length+' 門','count'));
+  list.append(head);
+  if(!courses.length) list.append(node('p',staff?'目前沒有授課或受邀的課程。':'目前尚未加入課程小組。','muted'));
+  for(const c of courses) listEntry(list,c.title,staff?(c.owner===home.uid?'授課教師':'助教'):c.name,()=>navigate('course/'+c.id));
+  if(!courses.length && (home.teacher || !staff)) {
+    const actions=node('div',undefined,'form-actions');
+    if(home.teacher) button(actions,'新增課程',()=>navigate('create-course'),'primary');
+    if(!staff) {
+      button(actions,'加入小組',()=>navigate('join'),'primary');
+      button(actions,'建立小組',()=>navigate('create-team'));
+    }
+    list.append(actions);
+  }
 }
 function profile() {
   const user=auth.currentUser;
@@ -316,11 +335,14 @@ async function course(c,task) {
   details.append(createShareCode('課程代碼',c.id));
   if (!staff) details.append(node('p','本課程累計　'+data.total+' 分','score-card'));
   const list=panel(staff?'課堂活動與學生紀錄':'本組活動與答題紀錄');
-  if (!data.lessons.length) list.append(node('p','這門課還沒有活動。','muted'));
+  if (!data.lessons.length) {
+    list.append(node('p','這門課還沒有活動。','muted'));
+    if (data.role==='owner') button(list,'建立課堂活動',()=>navigate('course/'+c.id+'/new-activity'),'primary');
+  }
   for (const l of data.lessons) {
     const caption=l.title+' · '+phase[l.phase]+(staff?'':' · '+l.score+' 分');
     if (!staff && l.phase==='results' && !l.attended) list.append(node('p',caption+' · 未參與'));
-    else button(list,caption,()=>enter(c.id,l.id),'activity-card');
+    else listEntry(list,l.title,staff ? phase[l.phase] : phase[l.phase]+'　'+l.score+' 分',()=>enter(c.id,l.id),l.phase);
   }
   button(list,'更新活動清單',()=>course(c),'text-button');
 }

@@ -277,7 +277,7 @@ function renderCards(state) {
     const label=el('label',betting?`信心下注（可不押${unit.questions.length>1?'，整題組計一次分':''}）`:'本題未開放下注'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
     for (const v of betting?[0,1,2,3]:[0]) {const option=el('option',v===0?'不押（0 分）':`${v} 分`); option.value=v; stake.append(option);}
     card.dataset.betting=String(betting);
-    const button=el('button',unit.questions.length>1?'一次送出整個題組 →':'送出本組答案 →','primary wide'); button.type='submit';
+    const button=el('button',unit.questions.length>1?'一次送出整個題組':'送出本組答案','primary wide'); button.type='submit';
     card.append(label,stake,button);
     const draftKey=`classroom.draft.${auth.token}.${state.id}.${unit.id}`; card.dataset.draftKey=draftKey;
     try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {for (const q of unit.questions) {
@@ -351,7 +351,12 @@ function renderMonitor(state) {
       const cell = el("td"), answer = lookup.get(JSON.stringify([group.id,q]));
       if (answer) {
         const content=el('span',answer.text,'cell-answer');
-        if(answer.text.length>300) {content.tabIndex=0; content.setAttribute('role','region'); content.setAttribute('aria-label',`${group.name} 第 ${q} 題完整答案，可捲動閱讀`);}
+        if(answer.text.length>300) {
+          content.tabIndex=0;
+          content.setAttribute('role','region');
+          content.setAttribute('aria-label',`${group.name} 第 ${q} 題完整答案，可捲動閱讀`);
+          cell.append(el('span','長答案，可上下捲動閱讀','answer-reading-hint'));
+        }
         cell.append(content, el("small", `${timeText(answer.received_at)} · ${answerElapsedText(answer)} · ${answer.stake===0?'不押':`下注 ${answer.stake}`} · ${verdictNames[answer.verdict]}`));
         if(answer.points) cell.append(el('small',scoreParts(answer.points)));
         if(answer.author) cell.append(el('small','送出者　'+answer.author));
@@ -896,7 +901,6 @@ function renderTeacherWorkspace(state) {
   $('teacher-question-filter').hidden=preparing || !['monitor','results'].includes(teacherView);
   $('references').hidden=!state.reviewable_questions.length || !['monitor','results'].includes(teacherView);
   $('download-csv').hidden=!ended; $('sheet-export-controls').hidden=!state.source;
-  $('start').textContent='開始搶答 →';
   $('end').textContent=state.settings.mode==='sequential'?'提早結束整場':'結束搶答並公布結果';
   updateSetupStatus();
   if (auth?.course && preparing && teacherView==='monitor') $('phase-help').textContent='學生加入課程小組後，可從活動清單進入。';

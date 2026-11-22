@@ -2,18 +2,23 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>我的課程｜課堂搶答</title><link rel="stylesheet" href="/style.css">
+  <title>我的課程｜課間</title><meta name="description" content="進入課程、加入小組，查看課堂搶答活動與作答紀錄。"><link rel="stylesheet" href="style.css">
   <script src="/share-code.js" defer></script>
   <script src="/workspace.js" defer></script>
   <script type="module" src="/courses.js"></script>
 </head>
 <body>
-  <header class="topbar"><a href="/" class="brand">課堂搶答</a></header>
+  <header class="topbar"><a href="/" class="brand" aria-label="課間首頁"><span class="book-mark" aria-hidden="true"></span>課間<span class="brand-detail">課堂搶答</span></a></header>
   <main class="course-home">
-    <h1 id="title">課堂搶答</h1>
-    <nav id="login-roles" class="role-switch" aria-label="選擇身分" hidden><button id="student" aria-pressed="true">學生</button><button id="staff" aria-pressed="false">老師與助教</button></nav>
-    <p id="notice" role="status" hidden></p>
-    <section class="panel" id="login" hidden><h2 id="intro">登入你的小組</h2><p id="hint">使用自己的 Google 帳號登入，再加入或建立課程小組。</p><button id="google" class="primary" disabled>使用 Google 帳號登入</button></section>
+    <div class="course-entry">
+      <div class="course-heading"><h1 id="title">進入課堂</h1><p class="board-caption">小組搶答與課堂紀錄</p></div>
+      <div class="entry-controls">
+        <p id="notice" role="status" hidden></p>
+        <nav id="login-roles" class="role-switch" aria-label="選擇身分" hidden><button id="student" aria-pressed="true">學生</button><button id="staff" aria-pressed="false">老師與助教</button></nav>
+        <section id="login" hidden><h2 id="intro">登入你的小組</h2><p id="hint">使用自己的 Google 帳號登入，再加入或建立課程小組。</p><button id="google" class="primary" disabled>使用 Google 帳號登入</button></section>
+        <noscript><p>請開啟 JavaScript 以登入課程。</p></noscript>
+      </div>
+    </div>
     <div id="workspace"></div>
   </main>
 </body></html>

@@ -9,7 +9,7 @@
   const rail = make('nav','work-rail');
   rail.setAttribute('aria-label','工作區導覽');
   rail.id='work-rail';
-  const toggle = make('button','rail-toggle','☰');
+  const toggle = make('button','rail-toggle','目錄');
   toggle.setAttribute('aria-label','工作區導覽');
   toggle.setAttribute('aria-controls',rail.id);
   const profile = make('div','work-profile');
@@ -63,11 +63,10 @@
     menu.replaceChildren(make('span','profile-name',name));
     const {staff,teacher,admin,courseId,courseTitle,owner}=permissions;
     rail.replaceChildren(make('span','rail-heading','工作區目錄'));
-    function link(parent,view,label,mark) {
+    function link(parent,view,label) {
       const a=make('a','work-link');
       a.href='/#'+view;
       a.dataset.view=view;
-      if(mark) { const icon=make('span','rail-icon',mark); icon.setAttribute('aria-hidden','true'); a.append(icon); }
       a.append(document.createTextNode(label));
       a.onclick=event=>{
         if(event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -76,36 +75,36 @@
       };
       parent.append(a);
     }
-    link(rail,'home',staff?'我的課程':'我的小組','⌂');
+    link(rail,'home',staff?'我的課程':'我的小組');
     if(staff===false) {
-      link(rail,'join','加入小組','＋');
-      link(rail,'create-team','建立小組','＋');
+      link(rail,'join','加入小組');
+      link(rail,'create-team','建立小組');
     }
-    if(teacher) link(rail,'create-course','新增課程','＋');
+    if(teacher) link(rail,'create-course','新增課程');
     const records=staff?'學生作答與批改':'作答紀錄';
-    link(rail,'history',records,'◷');
+    link(rail,'history',records);
     if(staff===false || teacher || owner) {
       const current=courseId && (!staff || owner);
-      link(rail,current?'leaderboard/'+courseId:'leaderboard','課程排行榜','≡');
+      link(rail,current?'leaderboard/'+courseId:'leaderboard','課程排行榜');
     }
     if(admin) {
-      link(rail,'admin','授予教師資格','⚙');
-      link(rail,'legacy','分配舊活動','▤');
+      link(rail,'admin','授予教師資格');
+      link(rail,'legacy','分配舊活動');
     }
     if(courseId) {
       const path='course/'+courseId;
       rail.append(make('span','rail-heading',courseTitle || '目前課程'));
-      link(rail,path,'課程活動','▤');
+      link(rail,path,'課程活動');
       if(owner) {
-        link(rail,path+'/new-activity','建立課堂活動','＋');
-        link(rail,path+'/assistant','加入助教','＋');
-        link(rail,path+'/password','重設小組密碼','⚙');
+        link(rail,path+'/new-activity','建立課堂活動');
+        link(rail,path+'/assistant','加入助教');
+        link(rail,path+'/password','重設小組密碼');
       }
     }
     const accountHeading=make('span','rail-heading','帳號');
     accountHeading.id='work-account-heading';
     rail.append(accountHeading);
-    link(rail,'account','我的帳號資料','○');
+    link(rail,'account','我的帳號資料');
     link(menu,'history',records);
     link(menu,'account','我的帳號資料');
     const logout=make('button','work-link','登出 Google 帳號');

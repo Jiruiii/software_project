@@ -20,7 +20,7 @@ async (page) => {
     check(await page.evaluate(()=>current.phase==='preparing'),'invalid duration started'); await page.locator('#quiz-duration').fill('0');
     await capture('settings-desktop');
     check(await page.locator('#activity button:visible').filter({hasText:'儲存'}).count()===1,'duplicate saves in activity settings');
-    check(await page.locator('#start').innerText()==='開始搶答 →','ambiguous start label');
+    check(await page.getByRole('button',{name:'開始搶答',exact:true}).getAttribute('id')==='start','ambiguous start label');
     await page.setViewportSize({width:390,height:844}); await capture('settings-mobile'); await page.setViewportSize({width:1280,height:900});
     await page.locator('#go-questions').click();
     check(await page.locator('#activity button:visible').filter({hasText:'儲存'}).count()===1,'duplicate saves in question settings');
