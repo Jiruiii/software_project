@@ -4,7 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 base=/var/lib/classroom-deploy
 account=classroom-deploy
-as_deploy() { runuser -u "$account" -- env HOME="$base" GIT_TERMINAL_PROMPT=0 "$@"; }
+as_deploy() (
+    cd -- "$base" || exit 1
+    runuser -u "$account" -- env HOME="$base" GIT_TERMINAL_PROMPT=0 "$@"
+)
 
 if ! id "$account" >/dev/null 2>&1; then
     useradd --system --user-group --home-dir "$base" --shell /usr/sbin/nologin "$account"
