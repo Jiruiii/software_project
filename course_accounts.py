@@ -37,8 +37,16 @@ class Courses:
             raise QuizError(400, "小組密碼需為 8～128 字元。")
         return password
 
-    def __init__(self, service, config, admin_uid, verify=firebase_identity):
-        self.s, self.db, self.config, self.admin, self.verify = service, service.db, config, admin_uid, verify
+    def __init__(self, service, config, admin_uid, verify=firebase_identity, *, admin_uids=()):
+        if not isinstance(admin_uids, (list, tuple)):
+            raise ValueError("adminUids 必須是 UID 陣列。")
+        uids = list(admin_uids)
+        if admin_uid is not None and admin_uid != "":
+            uids.append(admin_uid)
+        if any(not isinstance(uid, str) or not uid.strip() or len(uid) > 128 for uid in uids):
+            raise ValueError("管理員 UID 必須是 1～128 字元的非空白字串。")
+        self.admin_uids = frozenset(uids)
+        self.s, self.db, self.config, self.verify = service, service.db, config, verify
         self.attempts = {}
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS auth_project(project TEXT PRIMARY KEY);
@@ -77,11 +85,12 @@ class Courses:
         return record
 
     def student_workspace_session(self, token_hash):
-        return bool(self.one(
-            "SELECT 1 FROM course_sessions s JOIN people p ON p.uid=s.uid "
-            "WHERE s.hash=? AND s.kind='student' AND s.uid<>? AND p.teacher=0 "
-            "AND NOT EXISTS (SELECT 1 FROM assistants a WHERE a.uid=s.uid)", token_hash, self.admin or "",
-        ))
+        member = self.one(
+            "SELECT s.uid FROM course_sessions s JOIN people p ON p.uid=s.uid "
+            "WHERE s.hash=? AND s.kind='student' AND p.teacher=0 "
+            "AND NOT EXISTS (SELECT 1 FROM assistants a WHERE a.uid=s.uid)", token_hash,
+        )
+        return member is not None and member["uid"] not in self.admin_uids
 
     def access(self, scope, aid):
         if not self.one("SELECT 1 FROM lessons WHERE aid=? AND course=?", aid, scope["course"]):
@@ -110,11 +119,12 @@ class Courses:
             "SELECT t.* FROM members m JOIN teams t ON t.id=m.team WHERE m.uid=? AND m.course=?", uid, course
         )
         teacher = bool(self.one("SELECT teacher FROM people WHERE uid=?", uid)[0])
+        admin = uid in self.admin_uids
         if action == "home":
             result = {
                 "uid": uid,
                 "email": email,
-                "admin": uid == self.admin,
+                "admin": admin,
                 "teacher": teacher,
                 "teaching": self.rows(
                     "SELECT id,title,owner FROM courses WHERE owner=? OR id IN (SELECT course FROM assistants WHERE uid=?) ORDER BY rowid DESC",
@@ -126,7 +136,7 @@ class Courses:
                     uid,
                 ),
             }
-            if uid == self.admin:
+            if admin:
                 result["legacy"] = self.rows(
                     "SELECT id,title FROM activities WHERE id NOT IN (SELECT aid FROM lessons)"
                 )
@@ -135,7 +145,7 @@ class Courses:
                 )
             return result
         if action in ("grant", "assistant"):
-            if not (uid == self.admin if action == "grant" else role == "owner"):
+            if not (admin if action == "grant" else role == "owner"):
                 raise QuizError(403, "沒有指派權限。")
             target = text(data.get("uid"), "對方的帳號 UID", 128)
             if not self.one("SELECT 1 FROM people WHERE uid=?", target):
@@ -145,7 +155,7 @@ class Courses:
             else:
                 self.db.execute("INSERT OR IGNORE INTO assistants VALUES(?,?)", (course, target))
         elif action == "claim":
-            if uid != self.admin:
+            if not admin:
                 raise QuizError(403, "限管理員接管舊活動。")
             aid = text(data.get("aid"), "活動", 64)
             if not self.one("SELECT 1 FROM courses WHERE id=?", course) or not self.one(
@@ -193,7 +203,7 @@ class Courses:
             return self.course_history(course, role, team, data.get("staff") is True)
         elif action == "leaderboard":
             if role != "owner" and (
-                not team or teacher or uid == self.admin or self.one("SELECT 1 FROM assistants WHERE uid=?", uid)
+                not team or teacher or admin or self.one("SELECT 1 FROM assistants WHERE uid=?", uid)
             ):
                 raise QuizError(403, "無此課程排行榜權限。")
             return self.course_leaderboard(course)

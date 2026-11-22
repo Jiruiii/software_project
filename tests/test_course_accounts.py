@@ -155,6 +155,160 @@ class CourseTests(unittest.TestCase):
         )
         self.assertNotIn("author", self.s.snapshot(second, self.aid)["answers"][0])
 
+    def test_additional_admin_after_config_reload(self):
+        self.member("second", True)
+        self.s.transition(self.teacher, self.aid, "active")
+        session = self.student("second")
+        self.assertTrue(self.s.snapshot(session, self.aid)["chat_available"])
+        self.assertFalse(self.call("second", "home")["admin"])
+
+        web, verify = self.accounts.config, self.accounts.verify
+        self.accounts = Courses(self.s, web, "admin", verify, admin_uids=["second", "admin"])
+        for actor in ("admin", "second"):
+            home = self.call(actor, "home")
+            self.assertTrue(home["admin"])
+            self.assertIn(self.legacy, [a["id"] for a in home["legacy"]])
+        outsider = self.call("Second", "home", admin=True)
+        self.assertFalse(outsider["admin"])
+        self.assertNotIn("destinations", outsider)
+        with self.assertRaises(QuizError):
+            self.call("Second", "grant", uid="Second")
+        self.assertFalse(self.s.snapshot(session, self.aid).get("chat_available"))
+        with self.assertRaises(QuizError):
+            self.call("second", "leaderboard", course=self.course)
+        self.call("second", "grant", uid="Second")
+        self.assertTrue(self.call("Second", "home")["teacher"])
+        self.call("second", "claim", course=self.course, aid=self.legacy)
+        self.assertEqual(self.s.snapshot(self.teacher, self.legacy)["title"], "舊活動")
+
+        self.accounts = Courses(self.s, web, "admin", verify)
+        self.assertFalse(self.call("second", "home")["admin"])
+        self.assertTrue(self.call("admin", "home")["admin"])
+        self.assertTrue(self.s.snapshot(session, self.aid)["chat_available"])
+
+    def test_server_sheet_checks_course_and_syncs_after_logout_and_restart(self):
+        from google_sheets import ServerSheetsConnection, SheetsWorkflow
+        from guided_notes import Grid, from_google
+        from sheet_auto_sync import SheetsAutoSync
+        from test_google_sheets import COPY_URL, FakeGoogle
+        from test_guided_notes import payload
+
+        fake = FakeGoogle()
+        google = ServerSheetsConnection.__new__(ServerSheetsConnection)
+        google.request = fake.request
+        flow = SheetsWorkflow(self.s, google)
+        settings = Grid("課程設定", {(0, 0): self.course}, [], 200)
+        fake.data["sheets"].extend(payload(settings)["sheets"])
+        foreign = self.call("teacher", "staff-room", course=self.other)["token"]
+        with self.assertRaises(QuizError):
+            flow.preview(foreign, COPY_URL)
+        preview = flow.preview(self.teacher, COPY_URL)
+        fake.data["sheets"].pop()
+        with self.assertRaises(QuizError):
+            flow.import_activity(self.teacher, preview["preview_id"], "測試")
+        fake.data["sheets"].extend(payload(settings)["sheets"])
+        aid = flow.import_activity(self.teacher, preview["preview_id"], "測試")["id"]
+        self.member("student", True)
+        student = self.call("student", "student-room", course=self.course, aid=aid)["token"]
+        self.s.transition(self.teacher, aid, "active")
+        self.s.submit(student, aid, "1", "答案")
+        self.s.transition(self.teacher, aid, "results")
+        self.s.logout(self.teacher)
+        restored = QuizService(":memory:", "test")
+        self.addCleanup(restored.close)
+        self.s.db.backup(restored.db)
+        Courses(restored, self.accounts.config, "admin", self.accounts.verify)
+        worker = SheetsAutoSync(SheetsWorkflow(restored, google))
+        fake.data["sheets"].pop()
+        worker.run_once()
+        self.assertEqual(fake.writes, [])
+        self.assertEqual(restored.sheet_sync_states[aid]["state"], "error")
+        fake.data["sheets"].extend(payload(settings)["sheets"])
+        teacher = restored.courses.dispatch("teacher", "staff-room", {"course": self.course})["token"]
+        worker.watch(teacher, aid, retry=True)
+        worker.run_once()
+        self.assertEqual(from_google(fake.data)[0].value(4, 6), "答案（第一組）")
+        answer = restored.snapshot(teacher, aid)["answers"][0]
+        restored.review(teacher, aid, answer["id"], "incorrect", answer["review_revision"])
+        worker.run_once()
+        self.assertEqual(from_google(fake.data)[0].value(4, 6), "")
+        with patch.object(google, "request", side_effect=AssertionError("重複存取")):
+            worker.run_once()
+        self.assertEqual(restored.sheet_sync_states[aid]["state"], "synced")
+
+    def test_public_sheet_link_binding_revocation_and_recovery(self):
+        from google_sheets import ServerSheetsConnection, SheetsWorkflow
+        from sheet_auto_sync import SheetsAutoSync
+        from test_google_sheets import COPY_ID, COPY_URL, FakeGoogle
+
+        fake = FakeGoogle()
+        server = ServerSheetsConnection.__new__(ServerSheetsConnection)
+        server.access = Mock(return_value="test")
+        role = "reader"
+        def drive_permissions(url, body, headers):
+            self.assertIn("/files/" + COPY_ID + "/permissions?", url)
+            self.assertEqual(headers["X-Goog-Drive-Resource-Keys"], COPY_ID + "/copy_key")
+            if "pageToken=next" not in url:
+                return json.dumps({"permissions": [{"type": "user", "role": "writer"}], "nextPageToken": "next"})
+            return json.dumps({"permissions": [{"type": "anyone", "role": role}]})
+
+        def sheets_request(course, sid, body=None, resource_key=None):
+            self.assertEqual(resource_key, "copy_key")
+            return fake.request(course, sid, body)
+
+        server.request = sheets_request
+        server.transport = drive_permissions
+        flow = SheetsWorkflow(self.s, server)
+        url = COPY_URL + "?usp=sharing&resourcekey=copy_key"
+        for role in ("reader", "commenter"):
+            with self.assertRaisesRegex(QuizError, "編輯者"):
+                flow.preview(self.teacher, url)
+        role = "writer"
+        ready = flow.preview(self.teacher, url)["preview_id"]
+        foreign = self.call("teacher", "staff-room", course=self.other)["token"]
+        competing = flow.preview(foreign, url)["preview_id"]
+        role = "reader"
+        with self.assertRaisesRegex(QuizError, "編輯者"):
+            flow.import_activity(self.teacher, ready, "課堂測試")
+        role = "writer"
+        aid = flow.import_activity(self.teacher, ready, "課堂測試")["id"]
+        with self.assertRaisesRegex(QuizError, "其他課程"):
+            flow.import_activity(foreign, competing, "重複")
+        with self.assertRaisesRegex(QuizError, "其他課程"):
+            flow.preview(foreign, url)
+        self.member("student", True)
+        self.s.transition(self.teacher, aid, "active")
+        token = self.call("student", "student-room", course=self.course, aid=aid)["token"]
+        self.s.submit(token, aid, "1", "test")
+        self.s.transition(self.teacher, aid, "results")
+        worker = SheetsAutoSync(flow)
+        role = "reader"
+        worker.run_once()
+        self.assertFalse(fake.writes)
+        self.assertEqual(self.s.sheet_sync_states[aid]["state"], "error")
+        role = "writer"
+        worker.watch(self.teacher, aid, retry=True)
+        worker.run_once()
+        self.assertEqual(self.s.sheet_sync_states[aid]["state"], "synced")
+        self.assertEqual(len(fake.writes), 1)
+
+    def test_fixed_cloud_origin(self):
+        host = "classroom.example.org"
+        server = make_server(self.s, 0, public_origin="https://" + host)
+        self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        for target, origin, expected in ((host, "https://" + host, 200), (host, "https://elsewhere.test", 403),
+                                         ("localhost", "https://localhost", 403)):
+            with self.subTest(target=target, origin=origin):
+                conn = HTTPConnection("127.0.0.1", server.server_port)
+                try:
+                    conn.request("GET", "/api/firebase-config", headers={"Host": target, "Origin": origin})
+                    self.assertEqual(conn.getresponse().status, expected)
+                finally:
+                    conn.close()
+
     def test_permission_and_legacy_transfer(self):
         with self.assertRaises(QuizError):
             self.call("student", "grant", uid="student")

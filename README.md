@@ -4,12 +4,14 @@
 
 ## 第一次啟動
 
+Azure 部署與既有課堂資料搬移請參閱 [Azure 部署指南](docs/azure.md)。
+
 1. 準備 Python 3.11 以上及 Chrome 或 Edge，依 [Firebase 帳號與課程設定](docs/firebase.md) 安裝套件並建立本機設定檔。
 2. 在 Windows 專案目錄執行 `start-classroom.cmd`。啟動器優先使用專案的 `.venv`，也可以執行 `.\.venv\Scripts\python.exe app.py`。
 3. 保留啟動視窗，開啟 [本機課堂](http://localhost:8000)。管理員授予教師資格後，老師即可建課，按「複製」分享課程代碼。學生登入後建立或加入該課程的小組。
 4. 先停止程式再關閉啟動視窗，可在終端機按 `Ctrl+C`。用同一份資料庫重啟後，可繼續查看課程、分數與作答紀錄。
 
-目前伺服器只監聽本機。Firebase 負責登入，課堂資料存於 `data/classroom.sqlite3`。現有版本適合在同一台電腦用不同瀏覽器設定檔測試多種身分；Azure 部署仍待完成。登入及 Google Sheets 服務需要網路。
+本機測試可使用不同瀏覽器設定檔登入多種身分，課堂資料存於 `data/classroom.sqlite3`。Azure 模式以 HTTPS 反向代理連到同一套服務，使用原 Firebase 專案及 VM 上的持久化資料庫。登入及 Google Sheets 同步需要網路。
 
 ## 功能與操作文件
 

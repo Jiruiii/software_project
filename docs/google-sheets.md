@@ -2,7 +2,13 @@
 
 手動建立題號可直接測試搶答；要把答案寫回試算表，請由老師在自己的課程選「建立課堂活動」，再切換到「匯入 Google 學習單」。
 
-## 首次設定
+## Azure 伺服器寫回
+
+老師在自己的學習單副本點「共用」，把「一般存取權」設為「知道連結的任何人」，角色選「編輯者」。複製連結，在授課頁貼上網址、預覽並建立活動，網站會記住副本所屬課程。每門課使用自己的副本；拿到這份連結的人也能直接修改表格。
+
+伺服器在教師登出或服務重啟後仍可處理關題及改判；撤回連結編輯權會停止後續寫回，恢復後可按「重試同步」。原先分享給服務帳戶並以「課程設定」分頁 A1 標記課程的私人副本仍可照原方式使用。參閱 [Azure 部署指南](azure.md)。
+
+## 本機桌面模式首次設定
 
 1. 在 Google Cloud 建立專案，啟用 **Google Sheets API**。
 2. 設定 OAuth 同意畫面，將準備登入的 Google 帳號加入測試使用者。
@@ -20,6 +26,8 @@
 真實 JSON、密碼與授權 token 不可放入公開 repository；下載程式不會附帶這些資料。Google 官方設定參考：[Sheets Python quickstart](https://developers.google.com/workspace/sheets/api/quickstart/python)、[OAuth 同意畫面](https://developers.google.com/workspace/guides/configure-oauth-consent)。
 
 ## 匯入與寫回
+
+老師可直接使用自己的學習單。預覽時，單題會顯示合併作答格的左上角，例如 `G5:H5` 顯示為 `G5`。題組若在 G 欄列出 `（1）`、`（2）`，對應的答案格會顯示為 `H5`、`H6`。同一張表可混用兩種版面。若舊活動曾將答案寫進編號欄，請先在副本恢復原子題編號，再重新預覽並匯入。
 
 1. 開啟[官方單題範本](https://docs.google.com/spreadsheets/d/12uh5xhIx2wXFMy42KU8lN7rLFQ8GDugt9zfAFEvu-1E/copy)，建立自己的副本。
 2. 將副本網址貼到教師頁的「Google Sheets 連結」。

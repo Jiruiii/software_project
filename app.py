@@ -11,14 +11,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 from quiz_service import QuizError, QuizService
-from google_sheets import SheetsWorkflow
+from google_sheets import ServerSheetsConnection, SheetsWorkflow
 from sheet_auto_sync import SheetsAutoSync
 
 ROOT = Path(__file__).resolve().parent
 
 
-def make_server(service, port=8000, sheets=None, portal=False):
+def make_server(service, port=8000, sheets=None, portal=False, public_origin=None):
     accounts = service.courses
+    dns_label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    if public_origin and (not accounts or not re.fullmatch(rf"https://{dns_label}(?:\.{dns_label})+", public_origin)):
+        raise ValueError("雲端模式需要 Firebase 設定及完整 HTTPS 網域。")
     if not accounts and service.db.execute("SELECT 1 FROM sqlite_master WHERE name='auth_project'").fetchone():
         raise ValueError("此資料庫已啟用帳號，請載入原 Firebase 專案設定。")
     sheets = sheets or SheetsWorkflow(service)
@@ -59,10 +62,12 @@ def make_server(service, port=8000, sheets=None, portal=False):
         def dispatch(self):
             host = self.headers.get("Host", "")
             expected = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
+            if public_origin:
+                expected = {urlsplit(public_origin).netloc}
             if host not in expected:
-                raise QuizError(403, "此服務僅允許本機存取。")
+                raise QuizError(403, "此網址未開放存取。")
             path = urlsplit(self.path).path
-            if self.command == "GET" and path == "/oauth/callback":
+            if not public_origin and self.command == "GET" and path == "/oauth/callback":
                 query = parse_qs(urlsplit(self.path).query)
                 try:
                     sheets.google.finish(query.get("state",[""])[0], query.get("code",[""])[0],
@@ -73,7 +78,7 @@ def make_server(service, port=8000, sheets=None, portal=False):
                 body = f'<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Google 連線結果</title><link rel="stylesheet" href="/style.css"><main><h1>Google 連線</h1><p>{html.escape(message)}</p><p>可關閉此分頁。</p></main></html>'
                 return self.respond(status, body.encode(), "text/html; charset=utf-8")
             origin = self.headers.get("Origin")
-            if origin and origin != f"http://{host}":
+            if origin and origin != (public_origin or f"http://{host}"):
                 raise QuizError(403, "不允許跨來源操作。")
             if self.headers.get("Sec-Fetch-Site") == "cross-site":
                 raise QuizError(403, "不允許跨網站操作。")
@@ -131,7 +136,7 @@ def make_server(service, port=8000, sheets=None, portal=False):
             if self.command == "POST" and path == "/api/join":
                 return self.respond(200, service.join(data.get("code"), data.get("group")))
             if self.command == "POST" and path == "/api/logout":
-                if token:
+                if token and not sheets.server_managed:
                     try:
                         sheets.google.disconnect(service.teacher_key(token))
                     except QuizError:
@@ -141,6 +146,8 @@ def make_server(service, port=8000, sheets=None, portal=False):
                 owner = service.teacher_key(token)
                 if self.command == "GET" and path == "/api/google/status":
                     return self.respond(200, sheets.google.status(owner))
+                if sheets.server_managed:
+                    raise QuizError(403, "此網站由伺服器管理學習單授權。")
                 if self.command == "POST" and path == "/api/google/connect":
                     return self.respond(200, sheets.google.start(owner, f"http://127.0.0.1:{self.server.server_port}"))
                 if self.command == "POST" and path == "/api/google/disconnect":
@@ -230,10 +237,16 @@ def make_server(service, port=8000, sheets=None, portal=False):
 def main():
     parser = argparse.ArgumentParser(description="課堂搶答系統（本機）")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--public-origin", help="雲端網站的完整 HTTPS 網域")
+    parser.add_argument("--sheets-service-account", type=Path, help="Google Sheets 專用服務帳戶 JSON 路徑")
     parser.add_argument("--legacy", action="store_true", help="以舊版入口開啟尚未綁定 Firebase 的本機資料庫")
     parser.add_argument("--firebase-config", type=Path, default=ROOT / "credentials" / "firebase.json")
     parser.add_argument("--db", type=Path, default=ROOT / "data" / "classroom.sqlite3")
     args = parser.parse_args()
+    if args.public_origin and (args.legacy or not args.firebase_config.is_file() or not args.sheets_service_account):
+        parser.error("雲端模式需要 Firebase 及 Sheets 服務帳戶設定。")
+    if args.sheets_service_account and not args.public_origin:
+        parser.error("服務帳戶模式需要 --public-origin。")
     password = secrets.token_urlsafe(32)
     if args.legacy:
         password = os.environ.get("QUIZ_TEACHER_PASSWORD") or getpass.getpass("設定本次教師登入密碼（輸入不顯示）: ")
@@ -250,8 +263,11 @@ def main():
             web = {key: config[key] for key in ('apiKey', 'appId', 'authDomain', 'projectId')}
             if not all(isinstance(v,str) and v.strip() for v in web.values()) or not re.fullmatch(r'[a-z0-9-]+[.]firebaseapp[.]com', web['authDomain']):
                 raise ValueError("請使用 Firebase Web 應用程式設定中的預設 authDomain。")
-            Courses(service, web, config.get('adminUid'))
-        server = make_server(service, args.port, portal=not args.legacy)
+            Courses(service, web, config.get('adminUid'), admin_uids=config.get('adminUids', []))
+        sheets = None
+        if args.sheets_service_account:
+            sheets = SheetsWorkflow(service, ServerSheetsConnection(args.sheets_service_account))
+        server = make_server(service, args.port, sheets, portal=not args.legacy, public_origin=args.public_origin)
     except (ValueError, KeyError, ImportError) as error:
         service.close()
         parser.error(f"Firebase 設定無法載入。請參閱 docs/firebase.md。{error}")

@@ -175,6 +175,7 @@ def parse_grid(grid):
         if len(headers) != 1:
             raise QuizError(400, "無法唯一找到「題號／題目／作答」表頭。請確認版面，或在答案格加入 {{Q:題號}}。")
         header, qcol, contentcol, acol = headers[0]
+        answer_end = grid.span(header, acol)[3]
         parent_ids = set()
         for (row, col), value in sorted(grid.cells.items()):
             if col != qcol or row <= header or not value.strip():
@@ -196,6 +197,17 @@ def parse_grid(grid):
                     span = grid.span(r, acol)
                     if not grid.value(r, contentcol).strip() or grid.span(r, contentcol)[0] != r:
                         raise QuizError(400, "題組包含無法辨識的子題列。")
+                    if markers[i-1]:
+                        answer_col = span[3]
+                        if answer_end > acol + 1 and answer_col >= answer_end:
+                            raise QuizError(400, "子題編號右側沒有獨立的答案格。")
+                        if answer_end == acol + 1 and grid.value(header, answer_col).strip():
+                            raise QuizError(400, "子題編號右側屬於其他欄位，請確認答案格。")
+                        span = grid.span(r, answer_col)
+                        if span[1] != answer_col or (answer_end > acol + 1 and span[3] != answer_end):
+                            raise QuizError(400, "子題編號右側的答案格無法唯一定位。")
+                    elif span[3] < answer_end:
+                        raise QuizError(400, "題組作答區已分欄，請恢復左側的子題編號後重新匯入。")
                     if span[0] != r or span[2] != r+1 or any(span[1] <= c < span[3] for c in (qcol, contentcol)):
                         raise QuizError(400, "題組答案格無法唯一定位。")
                     targets.append({"question":f"{question}.{i}", "unit":question, "row":r, "col":span[1]})
@@ -225,8 +237,25 @@ def parse_grid(grid):
         target.setdefault("unit", target["question"])
         target["cell"] = a1(target["row"], target["col"])
         target["original"] = grid.cells.get((target["row"], target["col"]), "")
-    return {"sheet_title": grid.title, "sheet_id": grid.sheet_id, "targets": targets,
+    return {"sheet_title": grid.title, "sheet_id": grid.sheet_id, "targets": targets, "layout_version": 2,
             "fingerprint": fingerprint(grid, targets)}
+
+
+def check_legacy_group_targets(source, grid):
+    targets = source["targets"]
+    if source.get("layout_version", 1) >= 2 or all(t.get("unit", t["question"]) == t["question"] for t in targets):
+        return
+    # Prior exports may have replaced a label. Reconstruct the imported layout
+    # in memory before trusting old coordinates, including during journal recovery.
+    cells = grid.cells.copy()
+    for t in targets:
+        cells[t["row"], t["col"]] = t["original"]
+    try:
+        current = parse_grid(Grid(grid.title, cells, grid.merges))["targets"]
+    except QuizError:
+        current = []
+    if [(t["question"], t["cell"]) for t in current] != [(t["question"], t["cell"]) for t in targets]:
+        raise QuizError(409, "舊活動的子題答案格無法確認。請確認學習單的子題編號完整，再重新預覽並匯入。")
 
 
 def prepare_export(source, grid, winners, questions=None):

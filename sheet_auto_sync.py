@@ -13,6 +13,19 @@ class SheetsAutoSync:
         self.bindings = {}
         self.stop_event = threading.Event()
         self.thread = None
+        if self.flow.server_managed:
+            # Mark closures in the same transaction, including timer-driven ones.
+            with self.service.lock:
+                self.service.db.executescript("""
+                    CREATE TRIGGER IF NOT EXISTS sheet_round_closed AFTER UPDATE OF round_open ON activity_options
+                    WHEN OLD.round_open=1 AND NEW.round_open=0 BEGIN
+                        UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=NEW.activity_id;
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS sheet_game_ended AFTER UPDATE OF phase ON activities
+                    WHEN OLD.phase<>NEW.phase AND NEW.phase='results' BEGIN
+                        UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=NEW.id;
+                    END;
+                """)
 
     def status(self, aid, state, message):
         with self.service.lock:
@@ -20,6 +33,13 @@ class SheetsAutoSync:
 
     def watch(self, token, aid, retry=False):
         owner = self.service.teacher_key(token)
+        if self.flow.server_managed:
+            if retry:
+                self.flow.sheet_identity(token, owner, aid)
+                with self.service.lock, self.service.db:
+                    self.service.db.execute("UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?", (aid,))
+                    self.status(aid, "queued", "已排入重試。")
+            return
         with self.service.lock:
             if not self.service.db.execute('SELECT 1 FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone():
                 return
@@ -42,6 +62,8 @@ class SheetsAutoSync:
                 self.status(aid, 'queued', '已啟用自動同步，等待關題或核對最新答案。')
 
     def run_once(self):
+        if self.flow.server_managed:
+            return self.run_server_jobs()
         with self.lock:
             bindings = list(self.bindings.items())
         for aid, binding in bindings:
@@ -86,6 +108,37 @@ class SheetsAutoSync:
                     self.status(aid, 'error', f'同步未完成：{error} 可修正後按「重試同步」。')
             except Exception:
                 self.status(aid, 'error', '同步未完成，請檢查 Google 連線後重試。')
+
+    def run_server_jobs(self):
+        with self.service.lock:
+            jobs = self.service.db.execute("""
+                SELECT s.activity_id, l.course FROM sheet_sources s
+                JOIN lessons l ON l.aid=s.activity_id JOIN activities a ON a.id=l.aid
+                JOIN activity_options o ON o.activity_id=a.id
+                WHERE s.exported_at IS NULL AND (a.phase='results' OR
+                    (a.phase='active' AND o.mode='sequential' AND (o.round_index>0 OR o.round_open=0)))
+            """).fetchall()
+        for aid, course in jobs:
+            if self.stop_event.is_set():
+                return
+            try:
+                with self.service.lock:
+                    state = self.service.sheet_sync_states.get(aid, {})
+                    if state.get("state") == "error":
+                        continue
+                    self.status(aid, "syncing", "伺服器正在同步已關閉題目。")
+                result = self.flow._export(course, aid)
+                with self.service.lock:
+                    saved = self.service.db.execute("SELECT exported_at FROM sheet_sources WHERE activity_id=?", (aid,)).fetchone()
+                    if saved[0] is not None:
+                        self.status(aid, "synced", result["message"])
+            except QuizError as exc:
+                if "判定已改變" in str(exc):
+                    self.status(aid, "queued", "判定已更新，正在重新同步。")
+                else:
+                    self.status(aid, "error", f"同步未完成：{exc} 修正後可按「重試同步」。")
+            except Exception:
+                self.status(aid, "error", "同步未完成，請檢查服務帳戶與試算表分享設定並重試。")
 
     def start(self):
         if self.thread is not None: return

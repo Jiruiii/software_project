@@ -70,7 +70,7 @@ class RecoveryTests(unittest.TestCase):
         self.s.transition(self.t,self.aid,'active');self.s.submit(self.u,self.aid,'1','first');self.s.submit(self.v,self.aid,'1','second');self.s.transition(self.t,self.aid,'results')
     def tearDown(self):self.s.close();self.folder.cleanup()
     def value(self):return from_google(self.g.data)[0].value(4,6)
-    def fail_after_write(self,readback=True):
+    def fail_after_write(self,readback=True,answer_col=6):
         original=self.g.request;state={'wrote':False}
         def flaky(owner,sid,body=None):
             if readback and body is None and state['wrote']:raise QuizError(502,'readback outage')
@@ -83,7 +83,7 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(QuizError):self.f.export(self.t,self.aid)
         self.g.request=original
         self.assertIsNone(self.s.snapshot(self.t,self.aid)['source']['exported_at'])
-        self.assertEqual('first（A）',self.value())
+        self.assertEqual('first（A）',from_google(self.g.data)[0].value(4,answer_col))
     def regrade(self):self.s.review(self.t,self.aid,self.s.snapshot(self.t,self.aid)['answers'][0]['id'],'incorrect')
     def test_readback_failure_then_regrade_recovers(self):
         self.fail_after_write();self.regrade();self.f.export(self.t,self.aid)
@@ -116,9 +116,9 @@ class RecoveryTests(unittest.TestCase):
         self.s.transition(self.t,self.aid,'active')
         self.s.submit_unit(u,self.aid,'1',{'1.1':'first','1.2':'a child'})
         self.s.submit_unit(v,self.aid,'1',{'1.1':'second','1.2':'b child'})
-        self.s.transition(self.t,self.aid,'results');self.fail_after_write();self.regrade();self.f.export(self.t,self.aid)
+        self.s.transition(self.t,self.aid,'results');self.fail_after_write(answer_col=7);self.regrade();self.f.export(self.t,self.aid)
         grid=from_google(self.g.data)[0]
-        self.assertEqual(['second（B）','b child（B）'],[grid.value(4,6),grid.value(5,6)])
+        self.assertEqual(['second（B）','b child（B）'],[grid.value(4,7),grid.value(5,7)])
         self.assertEqual({'pending_answers':3,'complete':False},self.s.snapshot(u,self.aid)['grading'])
         for answer in self.s.snapshot(self.t,self.aid)['answers']:
             if answer['verdict']=='pending': self.s.review(self.t,self.aid,answer['id'],'correct')

@@ -138,6 +138,12 @@ async function googleStatus() {
   const ownGeneration = generation;
   const status = await api("/api/google/status");
   if (ownGeneration !== generation) return;
+  if (status.server_managed) {
+    $("google-status").textContent = "在試算表的「共用」中，將「一般存取權」設為「知道連結的任何人」及「編輯者」，再貼上副本網址。匯入後會連結到目前課程。";
+    $("google-connect").hidden = $("google-disconnect").hidden = $("google-auth-link").hidden = true;
+    document.querySelector('a[href="/google-setup.html"]').hidden = true;
+    return;
+  }
   $("google-status").textContent = status.connected ? "Google 已連線" : status.configured ? "設定已就緒，請連線 Google" : "尚未設定 Google，公開學習單仍可預覽與匯入";
   $("google-connect").hidden = status.connected;
   $("google-disconnect").hidden = !status.connected;

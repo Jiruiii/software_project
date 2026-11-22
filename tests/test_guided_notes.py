@@ -37,11 +37,20 @@ class GuidedNotesTests(unittest.TestCase):
         targets = parse_grid(grouped)["targets"]
         self.assertEqual(['1.1','1.2','2.1','2.2','3','4'], [t['question'] for t in targets])
         self.assertEqual(['1','1','2','2','3','4'], [t['unit'] for t in targets])
-        self.assertEqual(['G5','G6','G8','G9','G11','G13'], [t['cell'] for t in targets])
+        self.assertEqual(['H5','H6','H8','H9','G11','G13'], [t['cell'] for t in targets])
         shifted = Grid(grouped.title, {(r+7,c+2):v for (r,c),v in grouped.cells.items()}, [(r+7,c+2,r2+7,c2+2) for r,c,r2,c2 in grouped.merges])
-        self.assertEqual(['I12','I13','I15','I16','I18','I20'], [t['cell'] for t in parse_grid(shifted)['targets']])
+        self.assertEqual(['J12','J13','J15','J16','I18','I20'], [t['cell'] for t in parse_grid(shifted)['targets']])
         grouped.cells[(5,6)] = '(3)'
         with self.assertRaisesRegex(QuizError, '標記'): parse_grid(grouped)
+
+    def test_grouped_missing_labels_and_missing_answer_space(self):
+        grouped = from_xlsx((FIXTURES / "grouped.xlsx").read_bytes())[0]
+        damaged = copy.deepcopy(grouped)
+        for r in (4, 5):
+            damaged.cells[r, 6] = "舊答案"
+        with self.assertRaisesRegex(QuizError, "子題編號"): parse_grid(damaged)
+        grouped.merges.append((4, 6, 5, 8))
+        with self.assertRaisesRegex(QuizError, "右側"): parse_grid(grouped)
 
     def test_moved_rows_columns_and_answer_column(self):
         g = single()

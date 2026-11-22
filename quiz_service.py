@@ -88,8 +88,18 @@ class QuizService(ExtraFeatures):
             return bool(self.db.execute("SELECT 1 FROM sessions WHERE token_hash=? AND role='teacher' AND expires_at>?",
                                         (owner,time.time())).fetchone())
 
-    def create_from_source(self, token, title, source):
+    def check_sheet_course(self, sid, course):
+        with self.lock:
+            if self.db.execute("""
+                SELECT 1 FROM sheet_sources s JOIN lessons l ON s.activity_id=l.aid
+                WHERE json_extract(s.source_json, '$.spreadsheet_id')=? AND l.course<>? LIMIT 1
+            """, (sid, course)).fetchone():
+                raise QuizError(409, "此副本已匯入其他課程，請為本課程建立另一份副本。")
+
+    def create_from_source(self, token, title, source, *, bind_course=None):
         with self.lock, self.db:
+            if bind_course:
+                self.check_sheet_course(source["spreadsheet_id"], bind_course)
             result = self.create(token, title, [t["question"] for t in source["targets"]], _commit=False)
             self.db.executemany("UPDATE question_meta SET unit_id=?, prompt=? WHERE activity_id=? AND question_id=?",
                                 [(t.get("unit",t["question"]),t.get("prompt", ""),result["id"],t["question"]) for t in source["targets"]])
@@ -99,7 +109,11 @@ class QuizService(ExtraFeatures):
 
     def export_context(self, token, aid):
         with self.lock:
-            self._auth(token, "teacher")
+            self._auth(token, "teacher", aid)
+            return self._sheet_export_context(aid)
+
+    def _sheet_export_context(self, aid):
+        with self.lock:
             activity = self._activity(aid)
             closed = [r['id'] for r in self.db.execute('SELECT id FROM questions WHERE activity_id=? ORDER BY ordinal', (aid,))
                       if self._reviewable(activity, r['id'])]
@@ -113,9 +127,8 @@ class QuizService(ExtraFeatures):
             source['_closed_questions'] = closed
             return source, winners
 
-    def record_export(self, token, aid, expected, sheet_id):
+    def _record_export(self, aid, expected, sheet_id, closed_questions):
         with self.lock, self.db:
-            self._auth(token, "teacher")
             source = json.loads(self.db.execute("SELECT source_json FROM sheet_sources WHERE activity_id=?",(aid,)).fetchone()[0])
             source.setdefault("last_export", {}).update(expected)
             source.pop('pending_export', None)
@@ -124,21 +137,22 @@ class QuizService(ExtraFeatures):
             winners=self._sheet_answers(activity)
             desired={t['question']:(winners[t['question']] if t['question'] in winners else t['original'])
                      for t in source['targets'] if self._reviewable(activity,t['question']) and (t['question'] in winners or t['question'] in expected)}
-            current = desired == expected
+            closed_now = [r['id'] for r in self.db.execute(
+                'SELECT id FROM questions WHERE activity_id=? ORDER BY ordinal', (aid,)
+            ) if self._reviewable(activity, r['id'])]
+            current = desired == expected and closed_now == closed_questions
             self.db.execute("UPDATE sheet_sources SET source_json=?,exported_at=? WHERE activity_id=?",
                             (json.dumps(source,ensure_ascii=False),time.time() if current else None,aid))
             return current
 
-    def journal_export(self, token, aid, expected, previous, sheet_id):
+    def _journal_export(self, aid, expected, previous, sheet_id):
         with self.lock, self.db:
-            self._auth(token,'teacher')
             source=json.loads(self.db.execute('SELECT source_json FROM sheet_sources WHERE activity_id=?',(aid,)).fetchone()[0])
             source['pending_export']={'expected':expected,'previous':previous,'sheet_id':sheet_id}
             self.db.execute('UPDATE sheet_sources SET source_json=?,exported_at=NULL WHERE activity_id=?',(json.dumps(source,ensure_ascii=False),aid))
 
-    def recover_export(self, token, aid, observed):
+    def _recover_export(self, aid, observed):
         with self.lock, self.db:
-            self._auth(token,'teacher')
             source=json.loads(self.db.execute('SELECT source_json FROM sheet_sources WHERE activity_id=?',(aid,)).fetchone()[0])
             source.setdefault('last_export',{}).update(observed)
             source.pop('pending_export',None)
@@ -377,7 +391,9 @@ class QuizService(ExtraFeatures):
                     info = json.loads(source["source_json"])
                     activity["source"] = {"sheet_title":info["sheet_title"], "url":f"https://docs.google.com/spreadsheets/d/{info['spreadsheet_id']}/edit",
                                           "exported_at":source["exported_at"], "export_stale":bool(info.get("last_export")) and not source["exported_at"]}
-                    activity["source"]["sync"] = self.sheet_sync_states.get(aid, {'state':'idle', 'message':'連線 Google 後，關題會自動同步學習單。'})
+                    activity["source"]["sync"] = self.sheet_sync_states.get(aid, {
+                        'state': 'synced' if source["exported_at"] else 'idle',
+                        'message': '已完成學習單同步。' if source["exported_at"] else '學習單會在關題後同步。'})
                 activity["groups"] = [dict(r) for r in self.db.execute(
                     "SELECT id,name FROM groups WHERE activity_id=? ORDER BY name", (aid,))]
                 activity["answers"] = self._teacher_answers(aid)

@@ -1,0 +1,16 @@
+[Unit]
+Description=Deploy classroom from GitHub main
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=classroom-deploy
+Group=classroom-deploy
+WorkingDirectory=/var/lib/classroom-deploy
+Environment=HOME=/var/lib/classroom-deploy
+Environment=GIT_TERMINAL_PROMPT=0
+EnvironmentFile=/etc/classroom/site.env
+UMask=0022
+ExecStart=/usr/bin/flock -n /var/lib/classroom-deploy/update.lock /usr/bin/python3 /usr/local/lib/classroom-deploy/update_classroom.py
+TimeoutStartSec=15min

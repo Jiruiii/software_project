@@ -142,7 +142,8 @@ class Acceptance:
             for dimension,count in [('ROWS',dr),('COLUMNS',dc)]:
                 if count: requests.append({'insertDimension':{'range':{'sheetId':sheet_id,'dimension':dimension,'startIndex':0,'endIndex':count},'inheritFromBefore':False}})
             self.update(requests)
-            layouts.append((title,sheet_id,{q:(r+dr,6+dc) for q,r in [('1.1',4),('1.2',5),('2.1',7),('2.2',8),('3',10),('4',12)]}))
+            positions = [('1.1',4,7),('1.2',5,7),('2.1',7,7),('2.2',8,7),('3',10,6),('4',12,6)]
+            layouts.append((title, sheet_id, {q: (r + dr, c + dc) for q, r, c in positions}))
         return layouts
 
     @staticmethod

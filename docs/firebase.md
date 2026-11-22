@@ -1,5 +1,7 @@
 # 第一次使用 Google 帳號進入課堂
 
+Azure 網站使用相同 Firebase 專案與帳號，部署步驟及 Sheets 服務帳戶設定請參閱 [Azure 部署指南](azure.md)。下列步驟適用於本機啟動。
+
 這份指南適用於管理員、授課老師、助教與學生。Firebase Authentication 負責 Google 登入，課程、小組密碼雜湊、作答及批改紀錄保存在啟動服務那台電腦的 `data/classroom.sqlite3`。若要在既有資料庫啟用帳號，請先停止程式並備份資料庫。同一份資料庫會綁定一個 Firebase 專案。
 
 ## 1. 建立 Firebase 專案
@@ -28,7 +30,8 @@ notepad credentials\firebase.json
   "appId": "填入 appId",
   "authDomain": "你的專案.firebaseapp.com",
   "projectId": "填入 projectId",
-  "adminUid": ""
+  "adminUid": "",
+  "adminUids": []
 }
 ```
 
@@ -44,6 +47,12 @@ notepad credentials\firebase.json
 2. **老師帳號**用另一個瀏覽器設定檔登入，複製自己的 UID。回到管理員頁面，填入老師 UID，按「授予教師資格」。回老師首頁重新整理，即可建立課程，再把畫面上的**課程代碼**給學生。
 3. **學生測試帳號**選「學生」登入。第一位組員從右側目錄選「建立小組」，輸入課程代碼、組名及至少八個字元的密碼。其他組員各用自己的 Google 帳號選「加入小組」，填相同資料。下次登入從「我的小組」直接進入課程。
 4. **助教帳號**先登入一次，把 UID 給老師。老師在自己建立的課程按「加入助教」。助教登入後可查看該課程及批改；同一筆答案被別人先改判時，畫面會提示重新查看。建議用獨立瀏覽器設定檔同時測試各身分。
+
+### 加入第二位課堂網站管理員
+
+請第二位用自己的 Google 帳號登入課堂網站，從右上角「我的帳號資料」複製帳號 UID。網站管理員不需要 Firebase 專案成員資格。
+
+在伺服器的 `credentials/firebase.json` 保留原本的 `adminUid`，將 `adminUids` 設為 `["第二位的完整 UID"]`，然後重新啟動服務。兩位重新整理網站後都能授予教師資格及分配舊活動。尚未取得 UID 時可省略 `adminUids` 或保留空陣列。
 
 ## 4. 找回小組與重設密碼
 

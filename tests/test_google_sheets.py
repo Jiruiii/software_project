@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from google_sheets import GoogleConnection, SheetsWorkflow, SCOPE
-from guided_notes import SINGLE_TEMPLATE, Grid, from_google, from_xlsx
+from guided_notes import SINGLE_TEMPLATE, Grid, a1, fingerprint, from_google, from_xlsx, parse_grid
 from quiz_service import QuizService, QuizError
 from test_guided_notes import single, payload
 
@@ -32,7 +32,10 @@ class FakeGoogle:
         if not self.ignore:
             for req in body["requests"]:
                 update=req["updateCells"]; start=update["start"]
-                cell=self.data["sheets"][0]["data"][0]["rowData"][start["rowIndex"]]["values"][start["columnIndex"]]
+                cells=self.data["sheets"][0]["data"][0]["rowData"][start["rowIndex"]]["values"]
+                while len(cells) <= start["columnIndex"]:
+                    cells.append({})
+                cell=cells[start["columnIndex"]]
                 # Respect the real Sheets field mask, preserving format/note.
                 if update["fields"] != "userEnteredValue": raise AssertionError("unsafe fields")
                 cell["userEnteredValue"]=copy.deepcopy(update["rows"][0]["values"][0]["userEnteredValue"])
@@ -73,16 +76,44 @@ class SheetsWorkflowTests(unittest.TestCase):
 
     def test_grouped_import_writeback_and_reimport(self):
         grid=from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]
+        grid.cells[4,7] = '匯入時的原值'
         self.google.data=payload(grid)
-        a=self.imported(); aid=a['id']; student=self.service.join(a['code'],'group')['token']
+        preview=self.flow.preview(self.teacher,COPY_URL)
+        self.assertEqual(['H5','H6','H8','H9','G11','G13'], [t['cell'] for t in preview['targets']])
+        a=self.flow.import_activity(self.teacher,preview['preview_id'],'題組'); aid=a['id']
+        student=self.service.join(a['code'],'group')['token']
         self.service.transition(self.teacher,aid,'active')
         self.service.submit_unit(student,aid,'1',{'1.1':'first','1.2':'second'},3)
         self.service.transition(self.teacher,aid,'results')
         self.assertEqual(2,self.flow.export(self.teacher,aid)['written'])
         after=from_google(self.google.data)[0]
-        self.assertEqual('first（group）',after.value(4,6)); self.assertEqual('second（group）',after.value(5,6))
+        self.assertEqual('first（group）',after.value(4,7)); self.assertEqual('second（group）',after.value(5,7))
+        self.assertEqual([grid.value(r,6) for r in (4,5)], [after.value(r,6) for r in (4,5)])
         imported=self.imported()
         self.assertEqual(['1.1','1.2'],self.service.snapshot(self.teacher,imported['id'])['units'][0]['questions'])
+        answer = self.service.snapshot(self.teacher,aid)['answers'][0]
+        self.service.review(self.teacher,aid,answer['id'],'incorrect')
+        self.flow.export(self.teacher,aid)
+        self.assertEqual(grid.cells, from_google(self.google.data)[0].cells)
+
+    def test_legacy_group_export_stops_before_recovering_or_writing_labels(self):
+        grid = from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]
+        source = parse_grid(grid)
+        del source['layout_version']
+        for t in source['targets']:
+            if t['unit'] != t['question']:
+                t.update(col=6, cell=a1(t['row'],6), original=grid.value(t['row'],6))
+        source.update(spreadsheet_id=COPY_ID, fingerprint=fingerprint(grid,source['targets']))
+        source['pending_export'] = {'sheet_id':0,'expected':{'1.1':'舊答案'},'previous':{'1.1':grid.value(4,6)}}
+        grid.cells[4,6] = '舊答案'
+        self.google.data = payload(grid)
+        activity = self.service.create_from_source(self.teacher,'舊活動',source)
+        aid = activity['id']
+        self.service.transition(self.teacher,aid,'active')
+        self.service.transition(self.teacher,aid,'results')
+        with self.assertRaisesRegex(QuizError,'重新預覽'): self.flow.export(self.teacher,aid)
+        self.assertEqual([],self.google.writes)
+        self.assertEqual(source['pending_export'], self.service.export_context(self.teacher,aid)[0]['pending_export'])
 
     def test_judgment_during_export_requires_retry(self):
         a,_=self.ended(); aid=a['id']; answer=self.service.snapshot(self.teacher,aid)['answers'][0]

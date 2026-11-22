@@ -1,0 +1,23 @@
+[Unit]
+Description=課堂搶答網站
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=classroom
+Group=classroom
+WorkingDirectory=/opt/classroom
+EnvironmentFile=/etc/classroom/site.env
+StateDirectory=classroom
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/opt/classroom/.venv/bin/python /opt/classroom/app.py --public-origin ${PUBLIC_ORIGIN} --firebase-config /etc/classroom/firebase.json --sheets-service-account /etc/classroom/sheets.json --db /var/lib/classroom/classroom.sqlite3
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
