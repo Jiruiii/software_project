@@ -303,7 +303,7 @@ class QuizService(ExtraFeatures):
     @expire_first
     def transition(self, token, aid, target):
         with self.lock, self.db:
-            self._auth(token, "teacher")
+            self._auth(token, "teacher", aid)
             activity = self._activity(aid)
             if target not in ("active", "results"):
                 raise QuizError(400, "無效階段。")
@@ -313,16 +313,22 @@ class QuizService(ExtraFeatures):
             if activity["phase"] != required:
                 raise QuizError(409, "目前階段不允許此操作。重新搶答請建立新活動。")
             field = "started_at" if target == "active" else "ended_at"
-            self.db.execute(f"UPDATE activities SET phase=?, {field}=? WHERE id=?",
-                            (target, time.time(), aid))
-            if self._options(aid)["mode"] == "sequential":
+            now = time.time()
+            self.db.execute(f"UPDATE activities SET phase=?, {field}=? WHERE id=?", (target, now, aid))
+            options = self._options(aid)
+            if options["mode"] == "sequential":
                 if target == "active": self._open_round(aid, 0)
                 else: self._close_round(aid)
             else:
                 if target == 'active':
-                    self.db.execute('UPDATE question_meta SET opened_at=(SELECT started_at FROM activities WHERE id=?) WHERE activity_id=?', (aid, aid))
-                duration=self._options(aid)['duration_seconds']
-                self.db.execute('UPDATE activity_options SET deadline=? WHERE activity_id=?', (time.time()+duration if target=='active' and duration else None,aid))
+                    self.db.execute('UPDATE question_meta SET opened_at=? WHERE activity_id=?', (now, aid))
+                    if options['priority_source'] is not None:
+                        self.courses.check_priority_source(token, options['priority_source'])
+                        eligible = self.courses.prior_priority_groups(aid, options['priority_source'])
+                        self.db.execute('UPDATE activity_options SET priority_until=?,eligible_json=? WHERE activity_id=?',
+                                        (now + 3 if eligible else 0, json.dumps(eligible), aid))
+                duration = options['duration_seconds']
+                self.db.execute('UPDATE activity_options SET deadline=? WHERE activity_id=?', (now+duration if target=='active' and duration else None,aid))
             return {"phase": target}
 
     def _own_answer(self, row, activity=None):
@@ -408,4 +414,10 @@ class QuizService(ExtraFeatures):
                     winners.setdefault(r["question_id"], {**self._own_answer(r), "group_name": r["group_name"]})
                 answered={r['question_id'] for r in self.db.execute('SELECT DISTINCT question_id FROM answers WHERE activity_id=?',(aid,))}
                 activity["results"] = [{"question_id": q, "winner": winners.get(q), "has_answers":q in answered} for q in activity["questions"]]
-            return self._extra_snapshot(activity, session)
+            state = self._extra_snapshot(activity, session)
+            if self.courses and session["role"] == "teacher" and activity["phase"] == "preparing":
+                scope = self.courses.scope(token)
+                if scope["kind"] == "owner":
+                    state["priority_sources"] = self.courses.priority_sources(scope["course"])
+                    state["settings"]["priority_source"] = self._options(aid)["priority_source"]
+            return state

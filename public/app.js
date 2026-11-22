@@ -543,17 +543,37 @@ function renderState(state) {
     $('quiz-duration').value=state.settings.duration_seconds;
     syncModeHelp();
   }
+  if (state.priority_sources) {
+    const select = $('priority-source');
+    const choices = JSON.stringify(state.priority_sources);
+    const selected = $('settings-form').dataset.dirty === 'true' ? select.value : state.settings.priority_source;
+    if (select.dataset.choices !== choices) {
+      const options = state.priority_sources.map(source => {
+        const date = new Date(source.ended_at * 1000).toLocaleString('zh-TW');
+        return new Option(`${source.title}（${date}）`, source.id);
+      });
+      select.replaceChildren(new Option('所有組別同時開始', ''), ...options);
+      select.dataset.choices = choices;
+    }
+    select.value = selected || '';
+  }
   const sequential = state.settings.mode === "sequential";
   $('countdown').hidden=state.round.deadline===null || state.phase!=='active';
   $('countdown').textContent=`剩餘 ${Math.max(0,Math.ceil(state.round.deadline-state.server_time))} 秒 · 到期自動${sequential?'關閉本題':'公布結果'}`;
   $("round-controls").hidden = !teacher || auth?.assistant || !sequential || state.phase !== "active";
   $("close-round").hidden = !state.round.round_open;
   $("next-round").hidden = !!state.round.round_open;
-  $("round-status").hidden = !sequential || ended || (teacher && state.phase==='preparing');
   const priorityLeft = Math.max(0, Math.ceil(state.round.priority_until - state.server_time));
-  $("round-status").textContent = state.round.unit_id === null ? "逐題模式：老師開始後開放第一題。" :
-    `目前第 ${state.round.unit_id} 題 · ${state.round.round_open && !ended ? "作答中" : "已關閉"}` +
-    (priorityLeft && state.round.round_open && !ended ? ` · 保底先答剩 ${priorityLeft} 秒${state.round.own_priority ? "（本組可先答）" : ""}` : "");
+  const priorityActive = priorityLeft > 0 && state.phase === 'active' && (!sequential || state.round.round_open);
+  const status = [];
+  if (sequential) status.push(state.round.unit_id === null ? "逐題模式：老師開始後開放第一題。" :
+    `目前第 ${state.round.unit_id} 題 · ${state.round.round_open && !ended ? "作答中" : "已關閉"}`);
+  if (priorityActive) {
+    status.push(`保底先答剩 ${priorityLeft} 秒`);
+    if (!teacher) status.push(state.round.own_priority ? '本組可先答' : '請等倒數結束後作答');
+  }
+  $("round-status").hidden = !status.length || ended || (teacher && state.phase==='preparing');
+  $("round-status").textContent = status.join(' · ');
   $("sheet-export-controls").hidden = !teacher || !state.source;
   if (teacher && state.source) {
     const sync=state.source.sync || {state:'idle',message:'關題後自動同步學習單。'};
@@ -829,6 +849,7 @@ function syncQuestionInput() {
 function syncModeHelp() {
   const sequential=$('quiz-mode').value==='sequential';
   $('fairness-field').hidden=!sequential;
+  $('priority-source-field').hidden = sequential || !current?.priority_sources;
   if(!sequential) $('quiz-fairness').checked=false;
   $('mode-help').textContent=sequential?'一次開放一題，由你控制關題與下一題。':'開始後所有題目一起開放，學生自行選題作答。';
 }
@@ -885,7 +906,9 @@ function renderTeacherWorkspace(state) {
 }
 function activitySettingsPayload() {
   if(!$('quiz-duration').checkValidity()) {showTeacherView('settings'); $('quiz-duration').focus(); $('quiz-duration').reportValidity(); throw new Error('作答時間請填 0～3600 的整數秒。');}
-  return {mode:$('quiz-mode').value,fairness:$('quiz-fairness').checked,duration_seconds:Number($('quiz-duration').value)};
+  const mode = $('quiz-mode').value;
+  const source = mode === 'all' && current?.priority_sources ? $('priority-source').value : '';
+  return {mode, fairness:$('quiz-fairness').checked, duration_seconds:Number($('quiz-duration').value), priority_source:source || null};
 }
 async function saveActivitySettings(payload=activitySettingsPayload()) {
   try {await api(`/api/activities/${activityId}/settings`,payload); $('settings-form').dataset.dirty='false'; updateSetupStatus();}

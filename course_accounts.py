@@ -285,6 +285,31 @@ class Courses:
             "assistant": action == "staff-room" and role == "assistant",
         }
 
+    def priority_sources(self, course):
+        return self.rows(
+            "SELECT a.id,a.title,a.ended_at FROM activities a JOIN lessons l ON l.aid=a.id "
+            "WHERE l.course=? AND a.phase='results' ORDER BY a.ended_at DESC,a.id", course,
+        )
+
+    def check_priority_source(self, token, source):
+        scope = self.scope(token)
+        if scope["kind"] != "owner":
+            raise QuizError(403, "只有授課老師可指定保底來源。")
+        self.access(scope, source)
+        if self.s._activity(source)["phase"] != "results":
+            raise QuizError(409, "請選擇同一課程已結束的場次。")
+
+    def prior_priority_groups(self, aid, source):
+        matches = self.rows(
+            "SELECT current.gid, prior.gid AS prior_gid FROM attendance current "
+            "JOIN attendance prior ON prior.team=current.team "
+            "WHERE current.aid=? AND prior.aid=?", aid, source,
+        )
+        points = self.s._published_points(self.s._activity(source), self.s._units(source), self.s._options(source))
+        totals = {row["gid"]: self.s._sum_points(points.get(row["prior_gid"], {}))["total"] for row in matches}
+        lowest = min(totals.values(), default=None)
+        return [gid for gid, score in totals.items() if score == lowest]
+
     def course_leaderboard(self, course):
         totals = {
             row["id"]: {"group_name": row["name"], "score": 0}

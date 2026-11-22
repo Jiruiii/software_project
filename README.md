@@ -28,7 +28,7 @@ Azure 部署與既有課堂資料搬移請參閱 [Azure 部署指南](docs/azure
 
 已歸檔功能的規則收在 [OpenSpec 主規格](openspec/specs/)。管理員授權、教師建課、學生建組、搶答與回查紀錄已用實際帳號測過；真實助教帳號共同批改仍待驗收。[帳號整合驗收紀錄](openspec/changes/firebase-course-accounts/tasks.md)
 
-全題模式目前讓所有組別同時開始。老師指定上一場成績作為保底依據的功能列在[跨場保底待辦](docs/account-priority-backlog.md)。
+全題模式預設所有組別同時開始。授課老師可在活動設定選擇同課程已結束的場次，讓兩場都有參加且前場總分並列最低的小組先答三秒。[跨場保底規則](docs/account-priority-backlog.md)
 
 ## 常見問題
 

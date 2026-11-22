@@ -24,6 +24,10 @@
 
 作答中的師生快照另含 `top_five`，最多五列，每列提供 `rank`、`group_name` 與 `score`。名次依本場已公布總分計算，逐題模式關題後計入，全題模式結束時公布。結果階段以 `scoreboard` 提供完整排名。
 
+## 全題模式的跨場保底
+
+全題模式的 `POST /api/activities/{id}/settings` 可傳同課程已結束活動的 `priority_source`。送出 `null` 或省略時，使用全班同時開始；逐題模式使用原有 `fairness`。授課老師的準備中活動快照提供 `priority_sources` 選項與 `settings.priority_source`。開場後學生依 `round.own_priority`、`round.priority_until` 及 `available_questions` 顯示本組可作答的題目。時間採伺服器的 Unix 秒數。
+
 ## 課程紀錄、排行與本場討論
 
 帳號端點以 Firebase ID token 作為 Bearer 憑證，送出 JSON。活動端點使用進入該課程活動時取得的工作階段 token。

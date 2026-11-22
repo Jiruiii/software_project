@@ -214,7 +214,10 @@ class ExtraFeatures:
                 SELECT activity_id,id,id FROM questions;
         """)
         columns = {r["name"] for r in self.db.execute("PRAGMA table_info(answers)")}
-        if 'speed_scoring' not in {r['name'] for r in self.db.execute('PRAGMA table_info(activity_options)')}:
+        option_columns = {r['name'] for r in self.db.execute('PRAGMA table_info(activity_options)')}
+        if 'priority_source' not in option_columns:
+            self.db.execute('ALTER TABLE activity_options ADD COLUMN priority_source TEXT REFERENCES activities(id)')
+        if 'speed_scoring' not in option_columns:
             self.db.execute('ALTER TABLE activity_options ADD COLUMN speed_scoring INTEGER NOT NULL DEFAULT 1')
             self.db.execute("UPDATE activity_options SET speed_scoring=0 WHERE activity_id IN (SELECT id FROM activities WHERE phase!='preparing')")
         if "stake" not in columns:
@@ -455,10 +458,12 @@ class ExtraFeatures:
             units.setdefault(row["unit_id"], []).append(row["id"])
         return units
 
-    def configure(self, token, aid, mode, fairness=False, duration_seconds=0):
+    def configure(self, token, aid, mode, fairness=False, duration_seconds=0, priority_source=None):
         from quiz_service import QuizError
         with self.lock, self.db:
-            self._auth(token, "teacher")
+            self._auth(token, "teacher", aid)
+            if self.courses and self.courses.scope(token)["kind"] != "owner":
+                raise QuizError(403, "只有授課老師可修改活動規則。")
             if self._activity(aid)["phase"] != "preparing":
                 raise QuizError(409, "活動開始後不能修改規則。")
             if mode not in ("all", "sequential") or type(fairness) is not bool:
@@ -467,7 +472,14 @@ class ExtraFeatures:
                 raise QuizError(400, "保底只適用逐題模式。")
             if type(duration_seconds) is not int or not 0 <= duration_seconds <= 3600:
                 raise QuizError(400, "倒數必須是 0～3600 的整數秒；0 表示不限時。")
-            self.db.execute("UPDATE activity_options SET mode=?,fairness=?,duration_seconds=? WHERE activity_id=?", (mode, int(fairness), duration_seconds, aid))
+            if priority_source is not None:
+                if mode != "all" or not self.courses or not isinstance(priority_source, str) or not priority_source:
+                    raise QuizError(400, "請在課程全題模式選擇有效的保底來源場次。")
+                self.courses.check_priority_source(token, priority_source)
+            self.db.execute(
+                "UPDATE activity_options SET mode=?,fairness=?,duration_seconds=?,priority_source=? WHERE activity_id=?",
+                (mode, int(fairness), duration_seconds, priority_source, aid),
+            )
             return {"ok": True}
 
     def _open_round(self, aid, index):
@@ -520,11 +532,10 @@ class ExtraFeatures:
         now = time.time() if received is None else received
         if options['deadline'] is not None and now >= options['deadline']:
             raise QuizError(409, "作答時間已到，答案未送出。")
-        if options["mode"] != "sequential":
-            return
-        units = list(self._units(activity["id"]).values())
-        if not options["round_open"] or options["round_index"] < 0 or question not in units[options["round_index"]]:
-            raise QuizError(409, "這一題尚未開放或已關閉。")
+        if options["mode"] == "sequential":
+            units = list(self._units(activity["id"]).values())
+            if not options["round_open"] or options["round_index"] < 0 or question not in units[options["round_index"]]:
+                raise QuizError(409, "這一題尚未開放或已關閉。")
         if now < options["priority_until"] and session["group_id"] not in json.loads(options["eligible_json"]):
             raise QuizError(409, "目前是保底先答時間，請等待倒數結束。")
 
@@ -564,8 +575,8 @@ class ExtraFeatures:
         available = state["questions"] if state["phase"] == "active" else []
         if options["mode"] == "sequential":
             available = units.get(state["round"]["unit_id"], []) if options["round_open"] and state["phase"] == "active" else []
-            if time.time() < options["priority_until"] and not state["round"]["own_priority"] and session["role"] == "student":
-                available = []
+        if state["server_time"] < options["priority_until"] and not state["round"]["own_priority"] and session["role"] == "student":
+            available = []
         state["available_questions"] = available
         if session["role"] == "teacher":
             state["reviewable_questions"] = [q for q in state["questions"] if self._reviewable(state, q)]

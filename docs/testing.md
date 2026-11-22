@@ -9,6 +9,7 @@ python -m unittest discover -s tests -v
 在已安裝 `requirements-firebase.txt` 的 Python 環境執行。瀏覽器驗收使用隔離資料庫與測試身分。
 
 - 帳號工作區、課程加入、密碼重設、排行榜、聊天與代碼複製：`python tests/run_extra_ui.py --suite courses`。
+- 全題跨場保底：`python -m unittest discover -s tests -p test_cross_activity_priority.py -v`。教師選來源、重新載入設定及兩組學生在三秒前後的作答介面，可用 `python tests/run_extra_ui.py --suite cross-priority` 驗收。
 - 多選題、完整吻合判分及草稿恢復：`python tests/run_extra_ui.py --suite multiple`。
 - 題型、不押及本組即時分數驗收：`python tests/run_extra_ui.py --suite question-types`。
 
