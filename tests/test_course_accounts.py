@@ -47,6 +47,75 @@ class CourseTests(unittest.TestCase):
     def student(self, actor):
         return self.call(actor, "student-room", course=self.course, aid=self.aid)["token"]
 
+    def test_leave_team_revokes_only_own_course_student_sessions_and_keeps_scores(self):
+        self.member("student", True)
+        self.member("partner")
+        self.member("student", True, course=self.other)
+        other_teacher = self.call("teacher", "staff-room", course=self.other)["token"]
+        other_aid = self.s.create(other_teacher, "另一門課", ["1"])["id"]
+        other_token = self.call("student", "student-room", course=self.other, aid=other_aid)["token"]
+        self.call("teacher", "assistant", course=self.course, uid="student")
+        staff_token = self.room("student", aid=self.aid)
+        old, second_tab, partner = self.student("student"), self.student("student"), self.student("partner")
+        self.s.transition(self.teacher, self.aid, "active")
+        self.s.submit(old, self.aid, "1", "原組答案", 1)
+        self.s.transition(self.teacher, self.aid, "results")
+        answer = self.s.snapshot(self.teacher, self.aid)["answers"][0]
+        self.s.review(self.teacher, self.aid, answer["id"], "correct", answer["review_revision"])
+        original = self.call("partner", "course", course=self.course)["total"]
+        self.assertGreater(original, 0)
+        enrollment = self.call("student", "course", course=self.course)["membership"]["enrollment"]
+        self.call("student", "leave-team", course=self.course, enrollment=enrollment)
+        self.call("student", "leave-team", course=self.course, enrollment=enrollment)
+        for token in (old, second_tab):
+            with self.assertRaises(QuizError) as error:
+                self.s.snapshot(token, self.aid)
+            self.assertEqual(error.exception.status, 401)
+        with self.assertRaises(QuizError):
+            self.student("student")
+        with self.assertRaises(QuizError):
+            self.call("student", "history-detail", course=self.course, aid=self.aid)
+        self.assertEqual(self.s.snapshot(other_token, other_aid)["role"], "student")
+        self.assertEqual(self.s.snapshot(staff_token, self.aid)["role"], "teacher")
+        self.assertEqual(self.s.snapshot(partner, self.aid)["answers"][0]["text"], "原組答案")
+        self.assertEqual(self.call("partner", "course", course=self.course)["total"], original)
+        self.assertEqual(self.s.snapshot(self.teacher, self.aid)["answers"][0]["author"], "student@example.org")
+        last = self.call("partner", "course", course=self.course)["membership"]["enrollment"]
+        self.call("partner", "leave-team", course=self.course, enrollment=last)
+        self.assertEqual(self.call("teacher", "leaderboard", course=self.course)["rows"][0]["score"], original)
+        self.member("returning")
+        self.assertEqual(self.call("returning", "course", course=self.course)["total"], original)
+
+    def test_leave_confirmation_cannot_remove_another_or_new_membership(self):
+        self.member("student", True)
+        self.member("partner")
+        self.s.transition(self.teacher, self.aid, "active")
+        former_room = self.student("student")
+
+        def enrollment(actor):
+            return self.call(actor, "course", course=self.course)["membership"]["enrollment"]
+
+        first = enrollment("student")
+        with self.assertRaises(QuizError) as error:
+            self.call("partner", "leave-team", course=self.course, enrollment=first, uid="student")
+        self.assertEqual(error.exception.status, 409)
+        self.call("student", "leave-team", course=self.course, enrollment=first)
+        self.member("student")
+        second = enrollment("student")
+        self.assertNotEqual(second, first)
+        with self.assertRaises(QuizError):
+            self.call("student", "leave-team", course=self.course, enrollment=first)
+        self.call("student", "leave-team", course=self.course, enrollment=second)
+        self.call("student", "create-team", course=self.course, name="正確組", password="class123")
+        with self.assertRaises(QuizError):
+            self.call("student", "leave-team", course=self.course, enrollment=second)
+        self.assertEqual(self.call("student", "course", course=self.course)["membership"]["name"], "正確組")
+        with self.assertRaises(QuizError) as error:
+            self.s.submit(former_room, self.aid, "1", "原分頁送件", 0)
+        self.assertEqual(error.exception.status, 401)
+        self.s.submit(self.student("student"), self.aid, "1", "新組答案", 0)
+        self.assertEqual(self.s.snapshot(self.student("partner"), self.aid)["answers"], [])
+
     def test_chat_available_only_to_student_accounts(self):
         self.member("student", True)
         self.member("helper")
@@ -363,6 +432,14 @@ class CourseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             service = QuizService(Path(folder) / "course.db", "test")
             self.s.db.backup(service.db)
+            # Recreate the previous three-column membership schema with its existing data.
+            service.db.executescript("""
+                ALTER TABLE members RENAME TO saved_members;
+                CREATE TABLE members(course TEXT REFERENCES courses(id), uid TEXT REFERENCES people(uid),
+                    team TEXT REFERENCES teams(id), PRIMARY KEY(course,uid));
+                INSERT INTO members SELECT course,uid,team FROM saved_members;
+                DROP TABLE saved_members;
+            """)
             service.close()
             service = QuizService(Path(folder) / "course.db", "test")
             try:
@@ -370,6 +447,11 @@ class CourseTests(unittest.TestCase):
                     make_server(service, 0)
                 accounts = Courses(service, self.accounts.config, "admin", self.accounts.verify)
                 self.assertEqual(accounts.dispatch("returning", "home", {})["studying"][0]["id"], self.course)
+                membership = accounts.dispatch("returning", "course", {"course": self.course})["membership"]
+                self.assertEqual(len(membership["enrollment"]), 32)
+                accounts = Courses(service, self.accounts.config, "admin", self.accounts.verify)
+                accounts.dispatch("returning", "leave-team", {"course": self.course, "enrollment": membership["enrollment"]})
+                self.assertEqual(accounts.dispatch("returning", "home", {})["studying"], [])
                 with self.assertRaises(ValueError):
                     Courses(service, {"projectId": "another"}, "admin")
             finally:

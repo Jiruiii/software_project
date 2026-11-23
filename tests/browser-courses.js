@@ -36,6 +36,25 @@ async page => {
     if(await page.evaluate(()=>navigator.clipboard.readText())!==expected) throw Error(label+' 的剪貼簿內容不正確');
   }
   const rail=page.locator('#work-rail');
+  async function checkDirectoryHierarchy() {
+    for(const name of ['工作區目錄','生物','本場搶答','帳號']) {
+      await rail.getByRole('heading',{name,exact:true,level:2}).waitFor();
+    }
+    const heading=rail.getByRole('heading',{name:'工作區目錄'});
+    const home=rail.getByRole('link',{name:'我的課程',exact:true});
+    function metrics(el) {
+      const style=getComputedStyle(el), box=el.getBoundingClientRect();
+      return {size:parseFloat(style.fontSize),weight:Number(style.fontWeight),
+        textLeft:box.left+parseFloat(style.paddingLeft),height:box.height};
+    }
+    const title=await heading.evaluate(metrics), item=await home.evaluate(metrics);
+    if(title.size<=item.size || title.weight<=item.weight || title.textLeft>=item.textLeft || item.height<44)
+      throw Error('分區標題與連結的字級、字重、縮排或點擊區不符');
+    await home.focus();
+    await page.keyboard.press('Tab');
+    if(!await rail.getByRole('link',{name:'新增課程',exact:true}).evaluate(el=>el.matches(':focus-visible') && getComputedStyle(el).outlineStyle!=='none'))
+      throw Error('鍵盤未移至下一個側欄連結並顯示焦點');
+  }
   async function nav(name) {
     if(!await rail.isVisible()) await button('工作區導覽').click();
     await rail.getByRole('link',{name,exact:true}).click();
@@ -55,7 +74,7 @@ async page => {
   await nav('新增課程');
   await page.getByLabel('課程名稱').fill('數學');
   await button('建立課程').click();
-  await page.getByRole('heading',{name:'數學'}).waitFor();
+  await page.getByRole('heading',{name:'數學',level:1}).waitFor();
   await nav('新增課程');
   await page.getByLabel('課程名稱').fill('生物');
   await button('建立課程').click();
@@ -68,8 +87,14 @@ async page => {
   await page.locator('#session-code').waitFor();
   if(await page.locator('#session-code').innerText()!==code) throw Error('活動內課程代碼不一致');
   await checkCopy('課程代碼',code);
+  await rail.screenshot({path:'output/playwright/navigation-desktop.png'});
+  await checkDirectoryHierarchy();
   await page.setViewportSize({width:390,height:800});
   const directory=button('工作區導覽');
+  await directory.click();
+  await page.screenshot({path:'output/playwright/navigation-mobile.png'});
+  await checkDirectoryHierarchy();
+  await directory.click();
   async function fromDirectory(control) {
     await directory.click();
     await rail.locator(control).click();
@@ -80,6 +105,8 @@ async page => {
   }
   await fromDirectory('[data-view="questions"]');
   await expectContentFocus('content-title');
+  if(await rail.locator('#teacher-tabs [aria-current="page"]').getAttribute('data-view')!=='questions')
+    throw Error('目錄未標示目前的搶答頁籤');
   await fromDirectory('[data-view="settings"]');
   await page.locator('#quiz-duration').fill('3601');
   await fromDirectory('#start');
@@ -173,6 +200,36 @@ async page => {
   await peer.locator('.saved-answer').first().filter({hasText:'測試答案'}).waitFor();
   await peer.getByText('✓ 隊友已送出',{exact:true}).waitFor();
   await page.getByText('✓ 已交卷',{exact:true}).waitFor();
+  const destination=await page.request.post(new URL('/api/account/create-team',page.url()).href,{
+    headers:{Authorization:'Bearer assistant'},data:{course:code,name:'紅組',password:'right-team'}
+  });
+  if(!destination.ok()) throw Error('未建立換組目的地');
+  const membership=await page.context().newPage();
+  await membership.addInitScript(()=>{sessionStorage.fixture='teammate';sessionStorage.signed='1';});
+  await membership.setViewportSize({width:390,height:800});
+  await membership.goto(new URL('/#course/'+code,page.url()).href);
+  const leave=membership.getByRole('button',{name:'退出小組',exact:true});
+  const [confirmation]=await Promise.all([
+    membership.waitForEvent('dialog').then(async dialog=>{const text=dialog.message();await dialog.dismiss();return text;}),
+    leave.click()
+  ]);
+  if(!['生物','甲組','分數'].every(text=>confirmation.includes(text))) throw Error('退組確認缺少組別或成績說明');
+  await leave.waitFor();
+  await peer.getByText('✓ 隊友已送出',{exact:true}).waitFor();
+  await Promise.all([membership.waitForEvent('dialog').then(dialog=>dialog.accept()),leave.click()]);
+  await membership.getByText(/已退出「甲組」/).waitFor();
+  if(await membership.getByLabel('老師提供的課程代碼').inputValue()!==code) throw Error('退出後未帶入原課程代碼');
+  await peer.getByRole('heading',{name:'我的小組',exact:true}).waitFor();
+  await membership.getByLabel('小組名稱').fill('紅組');
+  await membership.getByLabel('小組密碼',{exact:true}).fill('right-team');
+  await membership.getByRole('button',{name:'加入小組',exact:true}).click();
+  await membership.getByRole('button',{name:'生物 · 紅組'}).click();
+  await membership.getByRole('button',{name:/第一堂/}).click();
+  await membership.waitForFunction(()=>document.getElementById('role-badge')?.textContent==='紅組');
+  await membership.locator('#answer-0').waitFor();
+  if(await membership.locator('.saved-answer:visible').count()) throw Error('舊組答案被帶進新組');
+  await page.getByText('✓ 已交卷',{exact:true}).waitFor();
+  await membership.close();
   await peer.close();
   await button('帳號選單').click();
   await page.locator('#work-menu').getByRole('link',{name:'作答紀錄'}).click();
@@ -287,5 +344,5 @@ async page => {
   await page.getByLabel('教師的帳號 UID').waitFor();
   await nav('分配舊活動');
   if(await page.getByLabel('教師的帳號 UID').count()) throw Error('管理表單混在同一頁');
-  return {passed:true, provider:'offline test fixture', loginRecovery:true, mobileTeacherActions:true, roles:['student','teacher','assistant','admin']};
+  return {passed:true, provider:'offline test fixture', loginRecovery:true, mobileTeacherActions:true, studentLeaveAndRejoin:true, roles:['student','teacher','assistant','admin']};
 }

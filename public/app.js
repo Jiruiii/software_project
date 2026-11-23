@@ -225,6 +225,8 @@ async function downloadFile(path, filename) {
 $("download-csv").onclick = () => action($("download-csv"), () => downloadFile(`/api/activities/${activityId}/csv`, "課堂搶答結果.csv"));
 $("settings-form").onsubmit = event => event.preventDefault();
 $("quiz-mode").onchange = ()=>{$('quiz-fairness').checked=$('quiz-mode').value==='sequential'; syncModeHelp();};
+$('use-priority-source').onchange = syncPrioritySetup;
+$('priority-source').onchange = syncPrioritySetup;
 for (const [id, kind] of [["close-round","close"],["next-round","next"]]) $(id).onclick = () => action($(id), async () => {
   window.courseNav.revealActivity();
   await api(`/api/activities/${activityId}/round`, {action:kind}); await refresh();
@@ -575,17 +577,20 @@ function renderState(state) {
   if (state.priority_sources) {
     const select = $('priority-source');
     const choices = JSON.stringify(state.priority_sources);
-    const selected = $('settings-form').dataset.dirty === 'true' ? select.value : state.settings.priority_source;
+    const editing = $('settings-form').dataset.dirty === 'true';
+    const selected = editing ? select.value : state.settings.priority_source;
     if (select.dataset.choices !== choices) {
       const options = state.priority_sources.map(source => {
         const date = new Date(source.ended_at * 1000).toLocaleString('zh-TW');
         return new Option(`${source.title}（${date}）`, source.id);
       });
-      select.replaceChildren(new Option('所有組別同時開始', ''), ...options);
+      select.replaceChildren(select.options[0], ...options);
       select.dataset.choices = choices;
     }
     select.value = selected || '';
+    if (!editing) $('use-priority-source').checked = !!selected;
   }
+  syncPrioritySetup();
   const sequential = state.settings.mode === "sequential";
   $('countdown').hidden=state.round.deadline===null || state.phase!=='active';
   $('countdown').textContent=`剩餘 ${Math.max(0,Math.ceil(state.round.deadline-state.server_time))} 秒 · 到期自動${sequential?'關閉本題':'公布結果'}`;
@@ -882,9 +887,28 @@ function syncQuestionInput() {
 function syncModeHelp() {
   const sequential=$('quiz-mode').value==='sequential';
   $('fairness-field').hidden=!sequential;
-  $('priority-source-field').hidden = sequential || !current?.priority_sources;
+  syncPrioritySetup();
   if(!sequential) $('quiz-fairness').checked=false;
   $('mode-help').textContent=sequential?'一次開放一題，由你控制關題與下一題。':'開始後所有題目一起開放，學生自行選題作答。';
+}
+function syncPrioritySetup() {
+  const sources=current?.priority_sources;
+  const rule=$('priority-rule-field'), toggle=$('use-priority-source'), select=$('priority-source');
+  rule.hidden=$('quiz-mode').value!=='all' || !sources;
+  if (!sources?.length) toggle.checked=false;
+  toggle.disabled=savingSettings || !sources?.length;
+  const enabled=!rule.hidden && toggle.checked;
+  $('priority-source-field').hidden=!enabled;
+  select.disabled=savingSettings || !enabled;
+  select.required=enabled;
+  if (rule.hidden) return;
+  const source=sources.find(item=>item.id===select.value);
+  let help='各組同時開始作答。';
+  if (!sources.length) help='這門課還沒有已結束的活動可供參考，各組會同時開始。';
+  else if (enabled && !source) help='可以選這門課中任何一場已結束的活動。';
+  else if (enabled) help=`開場時，只比較已進入「${current.title}」且參加過「${source.title}」的小組。其中在「${source.title}」總分最低的小組先答 3 秒，並列最低的都可先答。`;
+  const hint=$('priority-rule-help');
+  if (hint.textContent!==help) hint.textContent=help;
 }
 function updateSetupStatus() {
   const count=document.querySelectorAll('.question-config-form[data-dirty="true"]').length;
@@ -939,7 +963,12 @@ function renderTeacherWorkspace(state) {
 function activitySettingsPayload() {
   if(!$('quiz-duration').checkValidity()) {showTeacherView('settings'); $('quiz-duration').focus(); $('quiz-duration').reportValidity(); throw new Error('作答時間請填 0～3600 的整數秒。');}
   const mode = $('quiz-mode').value;
-  const source = mode === 'all' && current?.priority_sources ? $('priority-source').value : '';
+  const select = $('priority-source');
+  if (!select.checkValidity()) {
+    showTeacherView('settings'); select.focus(); select.reportValidity();
+    throw new Error('請選擇要參考的活動，或取消「讓低分組先答 3 秒」。');
+  }
+  const source = mode==='all' && $('use-priority-source').checked ? select.value : '';
   return {mode, fairness:$('quiz-fairness').checked, duration_seconds:Number($('quiz-duration').value), priority_source:source || null};
 }
 async function saveActivitySettings(payload=activitySettingsPayload()) {

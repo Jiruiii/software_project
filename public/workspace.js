@@ -64,7 +64,7 @@
     }
     menu.replaceChildren(make('span','profile-name',name));
     const {staff,teacher,admin,courseId,courseTitle,owner}=permissions;
-    rail.replaceChildren(make('span','rail-heading','工作區目錄'));
+    rail.replaceChildren(make('h2','rail-heading','工作區目錄'));
     function link(parent,view,label) {
       const a=make('a','work-link');
       a.href='/#'+view;
@@ -95,7 +95,7 @@
     }
     if(courseId) {
       const path='course/'+courseId;
-      rail.append(make('span','rail-heading',courseTitle || '目前課程'));
+      rail.append(make('h2','rail-heading',courseTitle || '目前課程'));
       link(rail,path,'課程活動');
       if(owner) {
         link(rail,path+'/new-activity','建立課堂活動');
@@ -103,7 +103,7 @@
         link(rail,path+'/password','重設小組密碼');
       }
     }
-    const accountHeading=make('span','rail-heading','帳號');
+    const accountHeading=make('h2','rail-heading','帳號');
     accountHeading.id='work-account-heading';
     rail.append(accountHeading);
     link(rail,'account','我的帳號資料');
@@ -142,7 +142,7 @@
     const tools=make('section','rail-activity');
     tools.id='work-activity';
     tools.hidden=!sessionStorage.getItem('classroom.activity');
-    tools.append(make('span','rail-heading','本場搶答'),tabs);
+    tools.append(make('h2','rail-heading','本場搶答'),tabs);
     document.getElementById('work-account-heading').before(tools);
     tabs.addEventListener('click',revealActivity);
     if(owner) {

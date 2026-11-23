@@ -315,6 +315,20 @@ async function enter(id,aid,review=false,replace=false) {
   const path=review ? '/classroom#review-'+aid : '/classroom';
   if(replace) location.replace(path); else location.assign(path);
 }
+async function leaveTeam(course, membership, version) {
+  if(!confirm(`確定退出「${course.title}」的「${membership.name}」嗎？\n已送出的答案與分數會留在原小組。`)) return;
+  const user=auth.currentUser;
+  await api('leave-team',{course:course.id,enrollment:membership.enrollment});
+  if(auth.currentUser!==user || !home) return;
+  home.studying=home.studying.filter(item=>item.id!==course.id);
+  if(pageVersion!==version) {draw(); return;}
+  history.replaceState(null,'','#join');
+  draw();
+  const join=$('workspace').querySelector('form');
+  join.elements.course.value=course.id;
+  join.elements.name.focus();
+  status('已退出「'+membership.name+'」。輸入正確的組名和密碼即可加入。');
+}
 async function course(c,task) {
   const version=++pageVersion;
   const data=await api('course',{course:c.id,staff});
@@ -339,9 +353,12 @@ async function course(c,task) {
       });
       return;
   }
-  const details=panel(staff?null:c.name);
+  const details=panel(staff?null:data.membership.name);
   details.append(createShareCode('課程代碼',c.id));
-  if (!staff) details.append(node('p','本課程累計　'+data.total+' 分','score-card'));
+  if (!staff) {
+    details.append(node('p','本課程累計　'+data.total+' 分','score-card'));
+    button(details,'退出小組',()=>leaveTeam(c,data.membership,version),'text-button');
+  }
   const list=panel(staff?'課堂活動與學生紀錄':'本組活動與答題紀錄');
   if (!data.lessons.length) {
     list.append(node('p','這門課還沒有活動。','muted'));

@@ -108,10 +108,13 @@
             <select id="quiz-mode"><option value="all">全題同時開放</option><option value="sequential">逐題搶答</option></select>
             <p id="mode-help" class="field-hint"></p>
             <label id="fairness-field" class="check-label" hidden><input id="quiz-fairness" type="checkbox">保底先答：每題開放時，總分並列最低的小組都可先答 3 秒</label>
-            <div id="priority-source-field" hidden>
-              <label for="priority-source">跨場保底的成績來源</label>
-              <select id="priority-source"><option value="">所有組別同時開始</option></select>
-              <p class="field-hint">可選本課程已結束的活動。兩場都有參加的小組中，前場總分並列最低者可先答 3 秒。</p>
+            <div id="priority-rule-field" hidden>
+              <label class="check-label"><input id="use-priority-source" type="checkbox" aria-controls="priority-source-field" aria-describedby="priority-rule-help">讓低分組先答 3 秒</label>
+              <div id="priority-source-field" hidden>
+                <label for="priority-source">參考哪一場活動的成績？</label>
+                <select id="priority-source" aria-describedby="priority-rule-help"><option value="">請選擇已結束的活動</option></select>
+              </div>
+              <p id="priority-rule-help" class="field-hint"></p>
             </div>
             <label for="quiz-duration">作答時間（秒）</label><input id="quiz-duration" type="number" min="0" max="3600" step="1" value="0" required>
             <p class="field-hint">填 0 表示不限時。逐題模式會每題重新倒數，含保底先答時間。</p>

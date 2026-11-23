@@ -55,7 +55,7 @@ class Courses:
             CREATE TABLE IF NOT EXISTS assistants(course TEXT REFERENCES courses(id), uid TEXT REFERENCES people(uid), PRIMARY KEY(course,uid));
             CREATE TABLE IF NOT EXISTS lessons(aid TEXT PRIMARY KEY REFERENCES activities(id), course TEXT NOT NULL REFERENCES courses(id));
             CREATE TABLE IF NOT EXISTS teams(id TEXT PRIMARY KEY, course TEXT NOT NULL REFERENCES courses(id), name TEXT NOT NULL, norm TEXT NOT NULL, salt BLOB NOT NULL, digest BLOB NOT NULL, UNIQUE(course,norm));
-            CREATE TABLE IF NOT EXISTS members(course TEXT REFERENCES courses(id), uid TEXT REFERENCES people(uid), team TEXT REFERENCES teams(id), PRIMARY KEY(course,uid));
+            CREATE TABLE IF NOT EXISTS members(course TEXT REFERENCES courses(id), uid TEXT REFERENCES people(uid), team TEXT REFERENCES teams(id), enrollment TEXT NOT NULL, PRIMARY KEY(course,uid));
             CREATE TABLE IF NOT EXISTS attendance(team TEXT REFERENCES teams(id), aid TEXT REFERENCES activities(id), gid TEXT UNIQUE REFERENCES groups(id), PRIMARY KEY(team,aid));
             CREATE TABLE IF NOT EXISTS course_sessions(hash TEXT PRIMARY KEY REFERENCES sessions(token_hash) ON DELETE CASCADE, uid TEXT REFERENCES people(uid), course TEXT REFERENCES courses(id), kind TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS submitters(answer INTEGER PRIMARY KEY REFERENCES answers(id), uid TEXT NOT NULL REFERENCES people(uid));
@@ -66,6 +66,9 @@ class Courses:
             raise ValueError("此資料庫已綁定另一個 Firebase 專案。")
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO auth_project VALUES(?)", (config["projectId"],))
+            if "enrollment" not in {col["name"] for col in self.db.execute("PRAGMA table_info(members)")}:
+                self.db.execute("ALTER TABLE members ADD COLUMN enrollment TEXT")
+                self.db.execute("UPDATE members SET enrollment=lower(hex(randomblob(16)))")
         service.courses = self
 
     def one(self, sql, *args):
@@ -116,7 +119,7 @@ class Courses:
         course = text(data.get("course", "-"), "課程代碼", 64).upper()
         role = self.role(uid, course)
         team = self.one(
-            "SELECT t.* FROM members m JOIN teams t ON t.id=m.team WHERE m.uid=? AND m.course=?", uid, course
+            "SELECT t.*,m.enrollment FROM members m JOIN teams t ON t.id=m.team WHERE m.uid=? AND m.course=?", uid, course
         )
         teacher = bool(self.one("SELECT teacher FROM people WHERE uid=?", uid)[0])
         admin = uid in self.admin_uids
@@ -172,6 +175,14 @@ class Courses:
             )
         elif action in ("create-team", "join-team"):
             self.register_team(uid, course, team, action, data)
+        elif action == "leave-team":
+            enrollment = text(data.get("enrollment"), "組籍識別碼", 32)
+            if team:
+                if team["enrollment"] != enrollment:
+                    raise QuizError(409, "你的小組已變更，請重新整理後再確認。")
+                self.db.execute("DELETE FROM members WHERE course=? AND uid=?", (course, uid))
+                self.db.execute("""DELETE FROM sessions WHERE token_hash IN (
+                    SELECT hash FROM course_sessions WHERE uid=? AND course=? AND kind='student')""", (uid, course))
         elif action == "reset-password":
             if role != "owner":
                 raise QuizError(403, "只有本課程的授課老師可以重設小組密碼。")
@@ -235,7 +246,8 @@ class Courses:
             self.db.execute(
                 "INSERT INTO teams VALUES(?,?,?,?,?,?)", (tid, course, name, name.casefold(), salt, digest)
             )
-        self.db.execute("INSERT INTO members VALUES(?,?,?)", (course, uid, tid))
+        self.db.execute("INSERT INTO members(course,uid,team,enrollment) VALUES(?,?,?,?)",
+                        (course, uid, tid, secrets.token_hex(16)))
         self.attempts.pop(key, None)
 
     def open_room(self, uid, course, role, team, action, data):
@@ -355,6 +367,8 @@ class Courses:
                     item["score"] = self.s._sum_points(pts.get(group["gid"], {}))["total"]
                 total += item["score"]
         result = {"lessons": lessons, "total": total, "role": role if staff else "student"}
+        if not staff:
+            result["membership"] = {"name": team["name"], "enrollment": team["enrollment"]}
         if staff and role == "owner":
             result["teams"] = self.rows("SELECT id,name FROM teams WHERE course=? ORDER BY name", course)
         return result

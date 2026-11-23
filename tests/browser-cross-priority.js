@@ -25,7 +25,6 @@ async page => {
       questions:[{question:'1', type:'choice', options:['是','否'], correct_index:0}]});
     await post(teacher.token, path+'/start', {});
     await post(students[1].previous.token, path+'/answers', {question:'1', answer:'是'});
-    await post(teacher.token, path+'/end', {});
     return {prior:prior.id, next:next.id, teacher, low:students[0].current, high:students[1].current};
   });
 
@@ -39,16 +38,47 @@ async page => {
     await tab.waitForFunction(() => current?.phase === 'preparing');
   }
   await openRoom(page, fixture.teacher);
-  const source = page.getByLabel('跨場保底的成績來源');
-  if (await source.inputValue() !== '') throw Error('新活動應預設全班同時開始');
+  const enable = page.getByRole('checkbox',{name:'讓低分組先答 3 秒'});
+  const source = page.getByLabel('參考哪一場活動的成績？');
+  await page.getByText('這門課還沒有已結束的活動可供參考，各組會同時開始。').waitFor();
+  if (!await enable.isDisabled() || await source.isVisible()) throw Error('沒有活動時不應能開啟保底');
+  const ended=await page.request.post(new URL('/api/activities/'+fixture.prior+'/end',classroom).href,{
+    headers:{Authorization:'Bearer '+fixture.teacher.token},data:{}});
+  if (!ended.ok()) throw Error('參考活動未結束');
+  await page.getByText('各組同時開始作答。',{exact:true}).waitFor();
+  if (await enable.isChecked() || await source.isVisible()) throw Error('預設應關閉低分組先答');
+  await enable.check();
+  for (const action of ['save-settings','start']) {
+    await page.locator('#'+action).click();
+    await page.getByText('請選擇要參考的活動，或取消「讓低分組先答 3 秒」。').waitFor();
+    if (!await source.evaluate(el=>document.activeElement===el) || await page.evaluate(()=>current.phase)!=='preparing') throw Error('缺少來源時應保留在設定頁');
+  }
   await source.selectOption(fixture.prior);
+  await page.evaluate(()=>refresh());
+  if (!await enable.isChecked() || await source.inputValue()!==fixture.prior) throw Error('輪詢蓋掉未儲存的選擇');
+  await page.locator('#priority-rule-help').filter({hasText:'已進入「第二堂」且參加過「第一堂」'}).waitFor();
+  const desktop=page.viewportSize();
+  await page.setViewportSize({width:390,height:844});
+  await page.locator('#priority-rule-field').screenshot({path:'output/playwright/priority-rule-mobile.png'});
+  if (await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)) throw Error('手機版參考活動設定超出畫面');
+  await page.setViewportSize(desktop);
   await page.locator('#save-settings').click();
   await page.waitForFunction(id => current.settings.priority_source === id, fixture.prior);
   await page.reload();
   await page.waitForFunction(id => document.querySelector('#priority-source').value === id, fixture.prior);
+  if (!await enable.isChecked() || !await source.isVisible()) throw Error('重新載入沒有還原已啟用的規則');
+  await enable.uncheck();
+  await page.locator('#save-settings').click();
+  await page.waitForFunction(()=>current.settings.priority_source===null);
+  await page.reload();
+  await enable.waitFor();
+  if (await enable.isChecked() || await source.isVisible()) throw Error('停用後重開應為全班同時開始');
+  await enable.check();
+  await source.selectOption(fixture.prior);
   await page.locator('#quiz-mode').selectOption('sequential');
-  if (await source.isVisible()) throw Error('逐題模式應使用本場成績');
+  if (await source.isVisible() || await enable.isVisible()) throw Error('逐題模式應使用本場成績');
   await page.locator('#quiz-mode').selectOption('all');
+  if (!await source.isVisible() || await source.inputValue()!==fixture.prior) throw Error('切回全題模式未保留草稿');
 
   const low = await page.context().newPage();
   const high = await page.context().newPage();
