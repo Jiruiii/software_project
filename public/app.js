@@ -595,8 +595,7 @@ function renderState(state) {
   }
   syncPrioritySetup();
   const sequential = state.settings.mode === "sequential";
-  $('countdown').hidden=state.round.deadline===null || state.phase!=='active';
-  $('countdown').textContent=`剩餘 ${Math.max(0,Math.ceil(state.round.deadline-state.server_time))} 秒 · 到期自動${sequential?'關閉本題':'公布結果'}`;
+  classroomMotion.countdown(state);
   $("round-controls").hidden = !teacher || auth?.assistant || !sequential || state.phase !== "active";
   $("close-round").hidden = !state.round.round_open;
   $("next-round").hidden = !!state.round.round_open;

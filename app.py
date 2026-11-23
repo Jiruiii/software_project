@@ -75,7 +75,7 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                     message, status = "Google 已連線。請回到原本的教師分頁，狀態會自動更新。", 200
                 except QuizError as exc:
                     message, status = str(exc), exc.status
-                body = f'<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Google 連線結果</title><link rel="stylesheet" href="/style.css"><main><h1>Google 連線</h1><p>{html.escape(message)}</p><p>可關閉此分頁。</p></main></html>'
+                body = f'<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Google 連線結果</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/style.css"><main><h1>Google 連線</h1><p>{html.escape(message)}</p><p>可關閉此分頁。</p></main></html>'
                 return self.respond(status, body.encode(), "text/html; charset=utf-8")
             origin = self.headers.get("Origin")
             if origin and origin != (public_origin or f"http://{host}"):
@@ -91,6 +91,10 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                     return self.respond(200, (ROOT / "public" / file).read_bytes(), mime + "; charset=utf-8")
                 if path == "/api/firebase-config":
                     return self.respond(200, accounts.config if accounts else {})
+            if self.command == "GET" and path == "/favicon.ico":
+                return self.respond(200, (ROOT / "public" / "favicon.ico").read_bytes(), "image/vnd.microsoft.icon")
+            if self.command == "GET" and path == "/chalk-grain.png":
+                return self.respond(200, (ROOT / "public" / "chalk-grain.png").read_bytes(), "image/png")
             if self.command == "GET" and path == "/priority-heartbeat.wav":
                 return self.respond(200, (ROOT / "public" / "priority-heartbeat.wav").read_bytes(), "audio/wav")
             if self.command == "GET" and path in ("/workspace.js", "/activity-chat.js", "/share-code.js", "/classroom-motion.js"):

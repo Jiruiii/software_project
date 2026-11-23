@@ -80,6 +80,13 @@ async page => {
   if(await page.locator('#login-roles').isVisible() || await rail.getByText('加入小組').count() || await page.locator('#workspace form').count()) throw Error('教師首頁角色或內容錯誤');
   if(!await rail.evaluate(e=>e.closest('.topbar')?.contains(e)) || await directory.isVisible()) throw Error('桌面功能應直接列在頂列');
   if(await rail.getByText('我的帳號資料',{exact:true}).count() || await rail.getByText('登出 Google 帳號').count()) throw Error('工作區導覽重複列出帳號操作');
+  await button('帳號選單').click();
+  const accountMenu=page.locator('#work-menu');
+  await accountMenu.getByRole('link',{name:'我的帳號資料'}).waitFor();
+  if(await accountMenu.getByRole('link',{name:'學生作答與批改'}).count()) throw Error('教師頭像選單重複列出批改入口');
+  await page.keyboard.press('Escape');
+  await nav('學生作答與批改');
+  await page.getByRole('heading',{name:'學生作答與批改',level:1}).waitFor();
   const adminPreview=await page.context().newPage();
   await adminPreview.addInitScript(()=>{sessionStorage.fixture='admin';sessionStorage.signed='1';});
   await adminPreview.goto(new URL('/#legacy',page.url()).href);
@@ -293,8 +300,7 @@ async page => {
   await button('確認結束').click();
   await page.waitForFunction(()=>current.phase==='results');
   await expectContentFocus('content-title');
-  await button('帳號選單').click();
-  await page.locator('#work-menu').getByRole('link',{name:'學生作答與批改'}).click();
+  await nav('學生作答與批改');
   await page.locator('.record summary').click();
   await page.locator('.answer-record').getByText('測試答案').waitFor();
   await button('前往批改').click();

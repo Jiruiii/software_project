@@ -28,12 +28,12 @@ async page => {
     return {prior:prior.id, next:next.id, teacher, low:students[0].current, high:students[1].current};
   });
 
-  async function openRoom(tab, room) {
+  async function openRoom(tab, room, aid=fixture.next) {
     await tab.goto(fixturePage);
     await tab.evaluate(({room, aid}) => {
       sessionStorage.setItem('classroom.auth', JSON.stringify(room));
       sessionStorage.setItem('classroom.activity', aid);
-    }, {room, aid:fixture.next});
+    }, {room, aid});
     await tab.goto(classroom);
     await tab.waitForFunction(() => current?.phase === 'preparing');
   }
@@ -82,7 +82,7 @@ async page => {
 
   const low = await page.context().newPage();
   const high = await page.context().newPage();
-  const sound = tab=>tab.getByRole('checkbox',{name:'保底倒數心跳聲'});
+  const sound = tab=>tab.getByRole('checkbox',{name:'作答倒數最後 3 秒播放心跳聲'});
   function observeAudio() {
     const prototype=AudioBufferSourceNode.prototype;
     const start=prototype.start, stop=prototype.stop;
@@ -95,7 +95,7 @@ async page => {
     };
     prototype.start=function(when,offset=0,...rest) {
       const result=start.call(this,when,offset,...rest);
-      heartbeats.starts.push({offset,duration:this.buffer.duration});
+      heartbeats.starts.push({offset,duration:this.buffer.duration,countdown:document.getElementById('countdown').textContent});
       return result;
     };
     prototype.stop=function(...args) {heartbeats.stops++;return stop.apply(this,args);};
@@ -103,6 +103,10 @@ async page => {
   try {
     await Promise.all([low.addInitScript(observeAudio),high.addInitScript(observeAudio)]);
     await Promise.all([openRoom(low, fixture.low), openRoom(high, fixture.high)]);
+    if(await sound(low).isVisible()) throw Error('不限時不應顯示倒數音效');
+    await page.locator('#quiz-duration').fill('11');
+    await page.locator('#save-settings').click();
+    await Promise.all([sound(low).waitFor(),sound(high).waitFor()]);
     if(await sound(page).count() || await sound(low).isChecked() || await sound(high).isChecked()) throw Error('心跳聲應只在學生端選用，預設關閉');
     await sound(low).check();
     await page.locator('#start').click();
@@ -112,45 +116,77 @@ async page => {
     ]);
     await low.locator('#priority-track').waitFor({state:'visible'});
     await high.locator('#priority-track').waitFor({state:'visible'});
-    await low.waitForFunction(()=>heartbeats.starts.length===1);
-    if(await high.evaluate(()=>heartbeats.starts.length)) throw Error('靜音的等待組播放了心跳');
-    await sound(high).check();
-    await high.waitForFunction(()=>heartbeats.starts.length===1);
-    const first=await high.evaluate(()=>heartbeats.starts[0]);
-    if(first.duration!==3 || first.offset<=0 || first.offset>=3) throw Error('中途開啟應從三秒音軌的當下位置播放');
     await low.evaluate(()=>refresh());
     await high.waitForFunction(() => !document.querySelector('.question-card button').disabled && document.querySelector('#round-status').hidden);
     if(await high.locator('#priority-track').isVisible()) throw Error('保底結束後仍顯示倒數線');
+    if(await low.evaluate(()=>heartbeats.starts.length) || await high.evaluate(()=>heartbeats.starts.length)) throw Error('開場保底三秒不應播放心跳');
+    await high.locator('#answer-0').fill('一般作答');
+    await high.locator('.question-card button').click();
+    await high.waitForFunction(() => current.answers[0]?.text === '一般作答');
+    await low.waitForFunction(()=>heartbeats.starts.length===1);
+    const first=await low.evaluate(()=>heartbeats.starts[0]);
+    if(first.duration!==3 || !first.countdown.startsWith('剩餘 3 秒')) throw Error('開啟音效後應在作答剩三秒時開始播放');
+    if(await high.evaluate(()=>heartbeats.starts.length)) throw Error('靜音的學生播放了心跳');
+    await sound(high).check();
+    await high.waitForFunction(()=>heartbeats.starts.length===1);
+    const late=await high.evaluate(()=>heartbeats.starts[0]);
+    if(late.offset<=0 || late.offset>=3 || !/剩餘 [1-3] 秒/.test(late.countdown)) throw Error('中途開啟應只播放剩餘部分');
     for(const tab of [low,high]) {
       await tab.waitForFunction(()=>heartbeats.stops===1);
       if(await tab.evaluate(()=>heartbeats.starts.length!==1)) throw Error('更新狀態時重播了倒數');
     }
-    await high.locator('#answer-0').fill('一般作答');
-    await high.locator('.question-card button').click();
-    await high.waitForFunction(() => current.answers[0]?.text === '一般作答');
+    await low.waitForFunction(()=>current.phase==='results');
     await verifyAudioLifecycle(low);
+    await verifySequentialCountdown(low);
     return {passed:true, sourceSaved:true, bothStudentStates:true, submittedAfterWindow:true,
-      heartbeat:true,lateEnable:true,mute:true,background:true,loadFailure:true};
+      answerDeadline:true,sequentialCountdown:true,lateEnable:true,mute:true,background:true,loadFailure:true};
   } finally {
     await Promise.all([low.close(), high.close()]);
+  }
+
+  async function verifySequentialCountdown(tab) {
+    async function post(token,path,data={}) {
+      const response=await page.request.post(new URL(path,classroom).href,{headers:{Authorization:'Bearer '+token},data});
+      if(!response.ok()) throw Error('逐題倒數驗收請求失敗 '+path);
+      return response.json();
+    }
+    const teacher=fixture.teacher.token;
+    const activity=await post(teacher,'/api/activities',{title:'逐題限時驗收',questions:['1','2']});
+    const path='/api/activities/'+activity.id;
+    await post(teacher,path+'/settings',{mode:'sequential',duration_seconds:6,fairness:false});
+    const student=await post('student','/api/account/student-room',{course:fixture.low.course,aid:activity.id});
+    await openRoom(tab,student,activity.id);
+    await sound(tab).check();
+    await post(teacher,path+'/start');
+    await tab.waitForFunction(()=>heartbeats.starts.length===1);
+    await post(teacher,path+'/round',{action:'close'});
+    await tab.waitForFunction(()=>!current.round.round_open && heartbeats.stops===1);
+    await post(teacher,path+'/round',{action:'next'});
+    await tab.waitForFunction(()=>current.round.unit_id==='2' && current.round.round_open);
+    if(await tab.evaluate(()=>heartbeats.starts.length!==1)) throw Error('第二題開放時太早播放心跳');
+    await tab.waitForFunction(()=>heartbeats.starts.length===2);
+    await tab.waitForFunction(()=>current.phase==='results' && heartbeats.stops===2);
+    if(await tab.evaluate(()=>heartbeats.starts.some(play=>!play.countdown.startsWith('剩餘 3 秒')))) throw Error('逐題心跳沒有對準最後三秒');
   }
 
   async function verifyAudioLifecycle(tab) {
     // Drive repeatable deadline and visibility transitions through the normal student renderer.
     await tab.evaluate(()=>{
-      const priority=classroomMotion.priority;
-      classroomMotion.priority=()=>{}; // Real polling continues, but cannot replace the controlled window.
+      const countdown=classroomMotion.countdown;
+      classroomMotion.countdown=()=>{}; // Keep fixture transitions independent of polling.
       let deadline=0;
-      window.showPriority=(seconds,newWindow=false)=>{
+      window.showCountdown=(seconds,newWindow=false,limit=10)=>{
         if(newWindow) deadline++;
-        priority({...current,phase:'active',settings:{mode:'sequential',fairness:true},
-          round:{priority_until:deadline},server_time:deadline-seconds},seconds>0);
+        countdown({...current,phase:'active',settings:{mode:'sequential',fairness:false,duration_seconds:limit},
+          round:{deadline:limit?deadline:null,round_index:deadline,round_open:seconds>0},server_time:deadline-seconds});
       };
       window.simulateHidden=hidden=>{
         Object.defineProperty(document,'hidden',{configurable:true,value:hidden});
         document.dispatchEvent(new Event('visibilitychange'));
       };
-      showPriority(2.8,true);
+      showCountdown(2.8,true,0);
+      if(heartbeats.starts.length!==1) throw Error('無期限不應播放心跳');
+      showCountdown(2.8,true);
     });
     await tab.waitForFunction(()=>heartbeats.starts.length===2);
     await tab.evaluate(()=>simulateHidden(true));
@@ -166,7 +202,7 @@ async page => {
     await tab.locator('#heartbeat-error').waitFor();
     if(await sound(tab).isChecked()) throw Error('載入失敗時開關沒有回復');
     await tab.unroute('**/priority-heartbeat.wav');
-    await tab.evaluate(()=>showPriority(0));
+    await tab.evaluate(()=>showCountdown(0));
     let deliver;
     const hold=new Promise(resolve=>{deliver=resolve;});
     await tab.route('**/priority-heartbeat.wav',async route=>{await hold;await route.fallback();});
@@ -174,11 +210,11 @@ async page => {
     const request=tab.waitForRequest('**/priority-heartbeat.wav');
     await sound(tab).check();
     await request;
-    await tab.evaluate(()=>{showPriority(1.8,true);showPriority(0);});
+    await tab.evaluate(()=>{showCountdown(1.8,true);showCountdown(0);});
     deliver();
     await tab.waitForFunction(before=>heartbeats.decoded>before,decoded);
     if(await tab.evaluate(()=>heartbeats.starts.length!==3)) throw Error('關題後才載入的音軌不應播放');
-    await tab.evaluate(()=>showPriority(2.5,true));
+    await tab.evaluate(()=>showCountdown(2.5,true));
     await tab.waitForFunction(()=>heartbeats.starts.length===4);
     await tab.evaluate(()=>classroomMotion.reset());
     if(await tab.evaluate(()=>heartbeats.stops!==4 || document.getElementById('heartbeat-enabled').checked)) throw Error('離開活動後未重設心跳');

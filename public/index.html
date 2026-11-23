@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>課間｜課堂搶答</title>
   <meta name="description" content="建立課堂活動、送出小組答案，查看搶答結果與批改紀錄。">
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="style.css">
   <script src="/share-code.js" defer></script>
   <script src="/activity-chat.js" defer></script>
@@ -22,7 +22,7 @@
     <noscript><p>請開啟 JavaScript 以加入課堂搶答。</p></noscript>
     <div id="notice" role="alert" hidden></div>
     <section id="entry" class="entry-layout" hidden>
-      <div class="course-heading"><h1>課堂搶答</h1><p class="board-caption">使用活動代碼加入本場搶答</p></div>
+      <div class="course-heading"><h1>課堂搶答</h1><p class="board-caption">使用活動代碼加入本場搶答</p><span class="board-eraser" aria-hidden="true"></span></div>
       <div class="entry-card">
         <div class="role-switch" role="group" aria-label="選擇身分"><button id="choose-student" aria-pressed="true">我是學生</button><button id="choose-teacher" aria-pressed="false">我是老師</button></div>
         <form id="join-form">
@@ -98,11 +98,11 @@
             <div id="round-controls" hidden><button id="close-round" class="danger">關閉本題</button><button id="next-round" class="primary">開啟下一題</button></div>
           </div>
           <div id="priority-track" aria-hidden="true" hidden><span></span></div>
+          <p id="countdown" class="integration-note" hidden></p>
           <div id="heartbeat-setting" hidden>
-            <label class="check-label"><input id="heartbeat-enabled" type="checkbox" autocomplete="off">保底倒數心跳聲</label>
+            <label class="check-label"><input id="heartbeat-enabled" type="checkbox" autocomplete="off">作答倒數最後 3 秒播放心跳聲</label>
             <p id="heartbeat-error" class="field-hint" role="status" hidden></p>
           </div>
-          <p id="countdown" class="integration-note" hidden></p>
           <section id="own-score" class="score-card" aria-live="polite" hidden><span>本組目前總分</span><strong id="own-score-total">0 分</strong><p id="own-score-pending"></p><small id="own-score-parts"></small><small id="speed-rule"></small></section>
           <form id="settings-form" class="panel" hidden>
             <h3>怎麼進行這場搶答？</h3><label for="quiz-mode">開放方式</label>

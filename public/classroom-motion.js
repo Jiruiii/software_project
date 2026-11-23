@@ -2,7 +2,8 @@
 const classroomMotion = (() => {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   let receipt = null, sequence = 0, lastConfirmed = 0;
-  let priorityKey = '', priorityTimer = 0, priorityEndsAt = 0;
+  let priorityKey = '', priorityTimer = 0;
+  let countdownKey = '', countdownTimer = 0, answerEndsAt = 0, expiryAction = '';
   let podiumObserver = null, podiumPlayed = false;
   const soundToggle = document.getElementById('heartbeat-enabled');
   const Audio = window.AudioContext || window.webkitAudioContext;
@@ -14,13 +15,13 @@ const classroomMotion = (() => {
     playing.disconnect();
     playing = null;
   }
-  function syncHeartbeat() {
-    if (document.hidden || !soundToggle.checked || soundContext?.state!=='running') {
+  function syncHeartbeat(remaining = (answerEndsAt-performance.now())/1000) {
+    if (!countdownKey || remaining<=0 || remaining>3 || document.hidden || !soundToggle.checked ||
+        $('heartbeat-setting').hidden || soundContext?.state!=='running') {
       stopHeartbeat();
       return;
     }
-    const remaining = (priorityEndsAt-performance.now())/1000;
-    if (playing || !heartbeat || remaining<=0) return;
+    if (playing || !heartbeat) return;
     const offset = Math.max(0, heartbeat.duration-remaining);
     playing = soundContext.createBufferSource();
     playing.buffer = heartbeat;
@@ -50,7 +51,7 @@ const classroomMotion = (() => {
     let context;
     try {
       context = soundContext = new Audio();
-      context.onstatechange = syncHeartbeat;
+      context.onstatechange = () => syncHeartbeat();
       const [,buffer] = await Promise.all([context.resume(),loadHeartbeat(context)]);
       if (context!==soundContext) return;
       heartbeat = buffer;
@@ -62,9 +63,38 @@ const classroomMotion = (() => {
       message.hidden = false;
     }
   };
-  document.addEventListener('visibilitychange',syncHeartbeat);
-  window.addEventListener('pagehide',stopHeartbeat);
-  window.addEventListener('pageshow',syncHeartbeat);
+  function pauseCountdown() {
+    clearTimeout(countdownTimer);
+    stopHeartbeat();
+  }
+  function tickCountdown() {
+    clearTimeout(countdownTimer);
+    if (!countdownKey || document.hidden) {stopHeartbeat(); return;}
+    const ms = Math.max(0,answerEndsAt-performance.now());
+    const seconds = Math.ceil(ms/1000);
+    $('countdown').textContent = `剩餘 ${seconds} 秒 · 到期自動${expiryAction}`;
+    syncHeartbeat(ms/1000);
+    if (seconds>0) countdownTimer = setTimeout(tickCountdown,Math.ceil(ms-(seconds-1)*1000));
+  }
+  function countdown(state) {
+    const timed = state.settings.duration_seconds>0;
+    const sequential = state.settings.mode==='sequential';
+    const {deadline,round_index,round_open} = state.round;
+    $('heartbeat-setting').hidden = !Audio || state.role!=='student' || !timed || state.phase==='results';
+    const active = timed && state.phase==='active' && Number.isFinite(deadline) && (!sequential || round_open);
+    $('countdown').hidden = !active;
+    const key = active ? `${state.id}/${round_index}/${deadline}` : '';
+    if (key===countdownKey) return;
+    pauseCountdown();
+    countdownKey = key;
+    if (!active) return;
+    answerEndsAt = performance.now()+(deadline-state.server_time)*1000;
+    expiryAction = sequential?'關閉本題':'公布結果';
+    tickCountdown();
+  }
+  document.addEventListener('visibilitychange',tickCountdown);
+  window.addEventListener('pagehide',pauseCountdown);
+  window.addEventListener('pageshow',tickCountdown);
 
   function animate(node, frames, duration, delay=0, easing='cubic-bezier(.2,.75,.25,1)') {
     if (reduced.matches || !node.animate) return null;
@@ -74,6 +104,9 @@ const classroomMotion = (() => {
     receipt?.node.remove();
     receipt = null;
     stopPriority();
+    countdownKey = '';
+    pauseCountdown();
+    $('countdown').hidden = true;
     disableHeartbeat();
     $('heartbeat-error').hidden = true;
     podiumObserver?.disconnect();
@@ -90,37 +123,40 @@ const classroomMotion = (() => {
     if (reduced.matches || !stage.animate || !stage.getClientRects().length) return;
     if (ticket.effect === 'stamp') {
       animate(stage.querySelector('.verdict-stamp'), [
-        {transform:'scale(1.75) rotate(-15deg)', opacity:0},
-        {transform:'scale(.9) rotate(-5deg)', opacity:1, offset:.6},
+        {transform:'scale(1.14) rotate(-9deg)', opacity:0},
+        {transform:'scale(.94) rotate(-5deg)', opacity:1, offset:.55},
         {transform:'scale(1) rotate(-5deg)'}
-      ], 330);
+      ], 490);
       return;
     }
-    if (!['kick','return'].includes(ticket.effect)) return;
-    const paper = el('span',undefined,'flying-answer');
-    paper.setAttribute('aria-hidden','true');
-    paper.append(el('b',ticket.answer.group_name), el('span',ticket.answer.text));
-    stage.append(paper);
-    if (ticket.effect === 'kick') {
-      const shoe = el('span',undefined,'kicking-shoe');
-      shoe.setAttribute('aria-hidden','true');
-      shoe.append(el('i',undefined,'shoe-upper'),el('i',undefined,'shoe-sole'),el('i',undefined,'shoe-laces'));
-      stage.append(shoe);
-      animate(shoe, [
-        {transform:'translate(112%, -50%) rotate(20deg)',opacity:0},
-        {transform:'translate(40%, -8%) rotate(8deg)',opacity:1,offset:.22},
-        {transform:'translate(-15%, 0) rotate(-12deg)',opacity:1,offset:.43},
-        {transform:'translate(125%, -55%) rotate(12deg)',opacity:0}
-      ], 455,0,'linear').finished.catch(()=>{}).finally(()=>shoe.remove());
+    if (!['erase','restore'].includes(ticket.effect)) return;
+    const scene = el('div',undefined,'erase-scene');
+    scene.setAttribute('aria-hidden','true');
+    const writing = el('span',undefined,'chalk-answer');
+    writing.append(el('b',ticket.answer.group_name), el('span',ticket.answer.text));
+    scene.append(writing);
+    stage.append(scene);
+    const erasing = ticket.effect==='erase';
+    const duration = erasing ? 1650 : 850;
+    if (erasing) {
+      const sweep = el('span',undefined,'eraser-sweep');
+      sweep.append(el('span',undefined,'board-eraser'));
+      scene.append(sweep);
+      // The eraser's centre and the edge of the remaining writing share the same coordinate.
+      animate(sweep,[
+        {transform:'translate(145%, -19%)'}, {transform:'translate(145%, -19%)',offset:.28},
+        {transform:'translate(100%, 0)',offset:.47}, {transform:'translate(0, 0)',offset:.85},
+        {transform:'translate(-45%, 12%)'}
+      ],duration,0,'linear');
+      animate(writing,[
+        {clipPath:'inset(0)'}, {clipPath:'inset(0)',offset:.47},
+        {clipPath:'inset(0 100% 0 0)',offset:.85}, {clipPath:'inset(0 100% 0 0)'}
+      ],duration,0,'linear');
+    } else {
+      animate(writing,[{clipPath:'inset(0 100% 0 0)'},{clipPath:'inset(0)',offset:.50},{clipPath:'inset(0)'}],duration,0,'ease-out');
     }
-    const frames = ticket.effect === 'kick' ? [
-      {transform:'none',opacity:1}, {transform:'translateX(2%) rotate(2deg)',opacity:1,offset:.36,easing:'ease-in'},
-      {transform:'translate(-116%,-26%) rotate(-16deg)',opacity:0}
-    ] : [
-      {transform:'translate(-112%,-18%) rotate(-13deg)'}, {transform:'translateX(4%) rotate(2deg)',offset:.65},
-      {transform:'none',opacity:1,offset:.82}, {transform:'none',opacity:0}
-    ];
-    animate(paper,frames,470,0,ticket.effect==='kick'?'linear':'ease-out').finished.catch(()=>{}).finally(()=>paper.remove());
+    animate(scene,[{opacity:1},{opacity:1,offset:.86},{opacity:0}],duration,0,'linear')
+      .finished.catch(()=>{}).finally(()=>scene.remove());
   }
 
   async function present(ticket, order, session, keyboard) {
@@ -130,6 +166,7 @@ const classroomMotion = (() => {
     receipt = ticket;
     const node = ticket.node = el('div',undefined,'review-receipt');
     const stage = el('div',undefined,'review-stage');
+    stage.dataset.effect = ticket.effect;
     stage.setAttribute('role','status');
     stage.append(el('span',ticket.caption,'review-caption'),
                  el('strong',ticket.message,ticket.effect==='stamp'?'verdict-stamp':'review-outcome'));
@@ -140,7 +177,7 @@ const classroomMotion = (() => {
         const undoOrder = ++sequence;
         await api(`/api/activities/${ticket.activity}/review-undo`,{batch_id:ticket.batch});
         await present({...ticket, batch:null, revision:ticket.revision+1, caption:'已復原',
-          message:verdictNames[ticket.answer.verdict], effect:ticket.effect==='kick'?'return':''},undoOrder,session,event.detail===0);
+          message:verdictNames[ticket.answer.verdict], effect:ticket.effect==='erase'?'restore':''},undoOrder,session,event.detail===0);
       });
       node.append(undo);
     }
@@ -160,25 +197,20 @@ const classroomMotion = (() => {
     const session = generation, order = ++sequence;
     const result = await api(`/api/activities/${activity}/review`,{answer_id:answer.id,verdict,revision:answer.review_revision});
     const next = result.candidate;
-    const caption = result.displaced ? '領先答案判錯' : '單筆批改';
+    const caption = result.displaced ? `${answer.group_name} 判錯` : '單筆批改';
     const message = result.displaced ? (next ? `遞補：${next.group_name} · ${verdictNames[next.verdict]}` : '沒有其他候選答案')
                                     : verdict==='correct'?'正解':'已判錯';
     await present({activity,answer,batch:result.batch_id,revision:answer.review_revision+1,caption,message,
-      effect:result.displaced?'kick':verdict==='correct'?'stamp':''},order,session,keyboard);
+      effect:result.displaced?'erase':verdict==='correct'?'stamp':''},order,session,keyboard);
   }
   function stopPriority() {
     clearTimeout(priorityTimer);
     priorityKey = '';
-    priorityEndsAt = 0;
-    stopHeartbeat();
     const track = $('priority-track');
     track.hidden = true;
     track.firstElementChild.getAnimations().forEach(a=>a.cancel());
   }
   function priority(state, active) {
-    const canUseSound = state.phase==='preparing' || active ||
-      (state.phase==='active' && state.settings.mode==='sequential' && state.settings.fairness);
-    $('heartbeat-setting').hidden = !Audio || state.role!=='student' || !canUseSound;
     if (!active || state.role!=='student') {
       if (priorityKey) stopPriority();
       return;
@@ -190,8 +222,6 @@ const classroomMotion = (() => {
     const track = $('priority-track'), line = track.firstElementChild;
     track.hidden = false;
     const remaining = Math.max(0,Math.min(3000,(state.round.priority_until-state.server_time)*1000));
-    priorityEndsAt = performance.now()+remaining;
-    syncHeartbeat();
     if (!reduced.matches) line.animate([{transform:`scaleX(${remaining/3000})`},{transform:'scaleX(0)'}],
                                       {duration:remaining, easing:'linear', fill:'forwards'});
     priorityTimer = setTimeout(()=>{if(priorityKey===key) refresh();},Math.ceil(remaining)+10);
@@ -224,5 +254,5 @@ const classroomMotion = (() => {
     });
     podiumObserver.observe($('scoreboard-table'));
   }
-  return {reset, review, mountReview, priority, submitted, standings};
+  return {reset, review, mountReview, countdown, priority, submitted, standings};
 })();

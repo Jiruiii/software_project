@@ -158,7 +158,7 @@
       link(adminLinks,'admin','授予教師資格');
       link(adminLinks,'legacy','將未歸屬活動加入課程');
     }
-    link(menu,'history',records);
+    if(!staff) link(menu,'history',records);
     link(menu,'account','我的帳號資料');
     const logout=make('button','work-link','登出 Google 帳號');
     logout.id='signout';
