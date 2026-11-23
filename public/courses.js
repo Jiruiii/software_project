@@ -119,7 +119,7 @@ function draw() {
     return;
   }
   if((view==='admin' || view==='legacy') && home.admin) {
-    $('title').textContent=view==='admin'?'授予教師資格':'分配舊活動';
+    $('title').textContent=view==='admin'?'授予教師資格':'將未歸屬活動加入課程';
     adminPanel(view);
     return;
   }
@@ -293,15 +293,28 @@ function adminPanel(view) {
     return;
   }
   if (!home.legacy.length || !home.destinations.length) {
-    admin.append(node('p',home.legacy.length?'請先建立可接收活動的課程。':'目前沒有待分配的舊活動。','muted'));
+    admin.append(node('p',home.legacy.length?'目前沒有可選的課程。請先由授課老師建立課程，再加入活動。':'目前沒有未歸屬的活動。','muted'));
     return;
   }
-  const select=node('select'); select.setAttribute('aria-label','歸屬課程');
-  for (const c of home.destinations) {const o=node('option',c.title+' · '+c.email); o.value=c.id; select.append(o);}
-  admin.append(select);
-  for (const lesson of home.legacy) button(admin,'分配「'+lesson.title+'」',async()=>{
-    if (!confirm('將「'+lesson.title+'」分配給 '+select.selectedOptions[0].textContent+'？')) return;
-    await api('claim',{aid:lesson.id,course:select.value}); await reload('已分配活動。');
+  admin.append(node('p','下列活動尚未加入任何課程。加入後，授課老師可以在該課程的「課程活動」中找到它們。','muted'));
+  const label=node('label','選擇課程');
+  const select=node('select');
+  select.id='activity-destination'; label.htmlFor=select.id;
+  const names=new Set(), duplicateNames=new Set();
+  for(const c of home.destinations) {
+    if(names.has(c.title)) duplicateNames.add(c.title);
+    names.add(c.title);
+  }
+  for(const c of home.destinations) {
+    const label=duplicateNames.has(c.title)?c.title+'（'+c.id+'）':c.title;
+    select.append(new Option(label,c.id));
+  }
+  admin.append(label,select);
+  for (const lesson of home.legacy) button(admin,'將「'+lesson.title+'」加入課程',async()=>{
+    const course=home.destinations[select.selectedIndex];
+    if (!confirm('將「'+lesson.title+'」加入「'+course.title+'」課程？\n授課老師：'+course.email)) return;
+    await api('claim',{aid:lesson.id,course:course.id});
+    await reload('已將「'+lesson.title+'」加入「'+course.title+'」課程。');
   });
 }
 async function enter(id,aid,review=false,replace=false) {

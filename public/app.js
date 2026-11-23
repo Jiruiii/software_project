@@ -228,8 +228,11 @@ $("quiz-mode").onchange = ()=>{$('quiz-fairness').checked=$('quiz-mode').value==
 $('use-priority-source').onchange = syncPrioritySetup;
 $('priority-source').onchange = syncPrioritySetup;
 for (const [id, kind] of [["close-round","close"],["next-round","next"]]) $(id).onclick = () => action($(id), async () => {
-  window.courseNav.revealActivity();
-  await api(`/api/activities/${activityId}/round`, {action:kind}); await refresh();
+  const roundActivity=activityId;
+  await api(`/api/activities/${roundActivity}/round`, {action:kind}); await refresh();
+  if(activityId===roundActivity && document.activeElement===document.body) {
+    ($('round-status').hidden ? $('content-title') : $('round-status')).focus();
+  }
 });
 function renderList(items) {
   const key = JSON.stringify(items); if (lastList === key) return; lastList = key;

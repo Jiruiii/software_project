@@ -159,12 +159,12 @@ class Courses:
                 self.db.execute("INSERT OR IGNORE INTO assistants VALUES(?,?)", (course, target))
         elif action == "claim":
             if not admin:
-                raise QuizError(403, "限管理員接管舊活動。")
+                raise QuizError(403, "只有管理員能將未歸屬活動加入課程。")
             aid = text(data.get("aid"), "活動", 64)
             if not self.one("SELECT 1 FROM courses WHERE id=?", course) or not self.one(
                 "SELECT 1 FROM activities WHERE id=? AND id NOT IN (SELECT aid FROM lessons)", aid
             ):
-                raise QuizError(409, "請選擇未分配活動及既有課程。")
+                raise QuizError(409, "請選擇尚未歸屬任何課程的活動，以及已建立的課程。")
             self.db.execute("INSERT INTO lessons VALUES(?,?)", (aid, course))
         elif action == "create-course":
             if not teacher:
