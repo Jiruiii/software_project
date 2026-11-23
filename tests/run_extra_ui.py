@@ -21,7 +21,7 @@ from guided_notes import from_xlsx, parse_grid
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--suite',choices=['extras','question-types','multiple','teacher-ui','batch-review','question-timing','auto-sync','teacher-reference','review-flow','courses','cross-priority'],default='extras')
+    parser.add_argument('--suite',choices=['extras','question-types','multiple','teacher-ui','batch-review','question-timing','auto-sync','teacher-reference','review-flow','courses','cross-priority','motion'],default='extras')
     suite=parser.parse_args().suite
     output = ROOT/"output/playwright"; output.mkdir(parents=True, exist_ok=True)
     service = QuizService(":memory:", "extras-test-only")
@@ -61,7 +61,7 @@ def main():
         from course_accounts import Courses
         from quiz_service import QuizError
         def verify_fixture(token, project):
-            if token not in ('admin', 'teacher', 'student', 'assistant'):
+            if token not in ('admin', 'teacher', 'student', 'teammate', 'assistant'):
                 raise QuizError(401, '未知的測試帳號')
             return token, token+'@example.org'
         accounts = Courses(service, dict(apiKey='fixture',projectId='demo',authDomain='demo.firebaseapp.com',appId='web'), 'admin', verify_fixture)

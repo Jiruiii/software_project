@@ -78,6 +78,7 @@ function showView() {
   }
 }
 function saveAuth(value) {
+  classroomMotion.reset();
   resetClusterReview();
   resetReplay();
   for (const key of Object.keys(sessionStorage)) if (key.startsWith('classroom.draft.')) sessionStorage.removeItem(key);
@@ -93,6 +94,7 @@ function saveAuth(value) {
   showView(); connection(true);
 }
 function selectActivity(id) {
+  classroomMotion.reset();
   resetClusterReview();
   resetReplay();
   generation++; activityId = id; current = null; cardsKey = lastMonitor = lastResults = "";
@@ -193,21 +195,25 @@ $("sheet-import").onclick = () => action($("sheet-import"), async () => {
 $("sheet-export").onclick = () => action($("sheet-export"), async () => {
   const result = await api(`/api/activities/${activityId}/sheet-sync`, {}); notice(result.message, true); await refresh();
 });
-for (const kind of ["start", "end"]) $(kind).onclick = () => action($(kind), async () => {
+$('start').onclick = () => action($('start'), async () => {
   if (savingSettings) return;
   const id = activityId;
-  if (kind === 'end') {
-    const dialog = $('end-dialog');
-    $('end-title').textContent = '要結束「'+current.title+'」嗎？';
-    dialog.returnValue = '';
-    const choice = new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), {once:true}));
-    dialog.showModal();
-    dialog.querySelector('[value="cancel"]').focus();
-    if (await choice !== 'end' || activityId !== id || current?.phase !== 'active') return;
-  }
-  if (kind==='start') await saveAllSettings();
-  await api(`/api/activities/${id}/${kind}`, {}); await refresh();
+  window.courseNav.revealActivity();
+  await saveAllSettings();
+  await api(`/api/activities/${id}/start`, {}); await refresh();
 });
+$('end').onclick = async () => {
+  const id = activityId, dialog = $('end-dialog');
+  if (!current || dialog.open) return;
+  $('end-title').textContent = '要結束「'+current.title+'」嗎？';
+  dialog.returnValue = '';
+  const choice = new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), {once:true}));
+  dialog.showModal();
+  dialog.querySelector('[value="cancel"]').focus();
+  if (await choice !== 'end' || activityId !== id || current?.phase !== 'active') return;
+  window.courseNav.revealActivity();
+  await action($('end'),async () => {await api(`/api/activities/${id}/end`, {}); await refresh();});
+};
 
 function timeText(seconds) { return new Date(seconds * 1000).toLocaleTimeString("zh-TW", {hour12:false}); }
 async function downloadFile(path, filename) {
@@ -220,6 +226,7 @@ $("download-csv").onclick = () => action($("download-csv"), () => downloadFile(`
 $("settings-form").onsubmit = event => event.preventDefault();
 $("quiz-mode").onchange = ()=>{$('quiz-fairness').checked=$('quiz-mode').value==='sequential'; syncModeHelp();};
 for (const [id, kind] of [["close-round","close"],["next-round","next"]]) $(id).onclick = () => action($(id), async () => {
+  window.courseNav.revealActivity();
   await api(`/api/activities/${activityId}/round`, {action:kind}); await refresh();
 });
 function renderList(items) {
@@ -322,7 +329,9 @@ function updateInputs() {
     const upcoming=current.phase==='preparing' || (sequential && unitIndex>current.round.round_index);
     const closed=current.phase==='results' || (sequential && (unitIndex<current.round.round_index || (unitIndex===current.round.round_index && !current.round.round_open)));
     card.classList.toggle('upcoming',upcoming);
-    card.classList.toggle('sent',sent); card.querySelector('.question-status').textContent=sent?'✓ 已送出':upcoming?'尚未開放':closed?'已關閉 · 未作答':'尚未送出';
+    card.classList.toggle('sent',sent);
+    const received=answers.get(card.dataset.question);
+    card.querySelector('.question-status').textContent=sent?(received.submitted_by_me===false?'✓ 隊友已送出':'✓ 已交卷'):upcoming?'尚未開放':closed?'已關閉 · 未作答':'尚未送出';
     if (sent) {stake.value=answers.get(card.dataset.question).stake; sessionStorage.removeItem(card.dataset.draftKey);}
     for (const field of fields) {
       const answer=answers.get(field.dataset.question), input=field.querySelector('.answer-input'); input.disabled=disabled; input.hidden=!!answer;
@@ -350,6 +359,7 @@ function renderMonitor(state) {
     for (const q of questions) {
       const cell = el("td"), answer = lookup.get(JSON.stringify([group.id,q]));
       if (answer) {
+        cell.dataset.answerId=answer.id;
         const content=el('span',answer.text,'cell-answer');
         if(answer.text.length>300) {
           content.tabIndex=0;
@@ -371,10 +381,11 @@ function renderMonitor(state) {
             const button = el('button', verdictNames[verdict], 'text-button'); button.dataset.verdict = verdict;
             button.setAttribute('aria-label', `${group.name} 第 ${q} 題判為${verdictNames[verdict]}`);
             button.disabled = answer.verdict === verdict;
-            button.onclick = () => action(button, async () => {await api(`/api/activities/${state.id}/review`, {answer_id:answer.id, verdict, revision:answer.review_revision}); await refresh();});
+            button.onclick = event => action(button,()=>classroomMotion.review(state.id,answer,verdict,event.detail===0));
             controls.append(button);
           }
           cell.append(controls);
+          classroomMotion.mountReview(cell,answer);
         }
       }
       else cell.append(el("span", "尚未送出", "unsent"));
@@ -465,6 +476,7 @@ function renderLiveRanking(state) {
   }));
 }
 function renderState(state) {
+  const previous = current;
   current = state;
   activityChat.sync(state);
   renderLiveRanking(state);
@@ -497,10 +509,22 @@ function renderState(state) {
     $('own-score-pending').hidden=!waiting.length;
   }
   $('scoreboard').hidden=!ended;
-  if (ended && $('scoreboard').dataset.values!==JSON.stringify([state.scoreboard,provisional])) {
-    $('scoreboard').dataset.values=JSON.stringify([state.scoreboard,provisional]);
+  if (ended && $('scoreboard').dataset.values!==JSON.stringify([state.id,state.scoreboard,provisional])) {
+    $('scoreboard').dataset.values=JSON.stringify([state.id,state.scoreboard,provisional]);
     const table=el('table'), head=el('tr'); head.append(el('th','名次'),el('th','組別'),el('th','押注分'),el('th','搶答分'),el('th',provisional?'暫時總分':'總分')); table.append(head);
-    for (const score of state.scoreboard) {const row=el('tr'); row.append(el('td',score.rank),el('th',score.group_name),el('td',score.wager),el('td',score.speed),el('td',score.score)); table.append(row);}
+    for (const score of state.scoreboard) {
+      const row=el('tr'), group=el('th');
+      if (!provisional && score.rank<=3) {
+        row.dataset.podium=score.rank;
+        const slip=el('span',score.group_name,'podium-slip');
+        if (score.rank===1) {
+          const star=el('span','☆','rank-star'); star.setAttribute('aria-hidden','true'); slip.append(star);
+        }
+        group.append(slip);
+      } else group.textContent=score.group_name;
+      row.append(el('td',score.rank),group,el('td',score.wager),el('td',score.speed),el('td',score.score));
+      table.append(row);
+    }
     $('scoreboard-table').replaceChildren(table);
   }
   renderReport(state);
@@ -579,12 +603,14 @@ function renderState(state) {
   }
   $("round-status").hidden = !status.length || ended || (teacher && state.phase==='preparing');
   $("round-status").textContent = status.join(' · ');
+  classroomMotion.priority(state,priorityActive);
   $("sheet-export-controls").hidden = !teacher || !state.source;
   if (teacher && state.source) {
     const sync=state.source.sync || {state:'idle',message:'關題後自動同步學習單。'};
     $("source-name").textContent = state.source.sheet_title;
     $('sheet-sync-status').textContent=sync.message;
     $('sheet-sync-status').dataset.state=sync.state;
+    $('sheet-sync-help').hidden=sync.state==='readonly';
     $("source-link").href = state.source.url;
     $("sheet-export").hidden = !['error','needs_auth'].includes(sync.state);
     $("sheet-export").textContent = '重試同步';
@@ -593,6 +619,8 @@ function renderState(state) {
   if (ended) renderResults(state);
   renderTeacherWorkspace(state);
   updateInputs();
+  classroomMotion.submitted(previous,state);
+  classroomMotion.standings(previous,state);
 }
 async function refresh() {
   if (!auth) return;
@@ -949,7 +977,11 @@ $('go-questions').onclick=()=>showTeacherView('questions');
 for(const button of $('teacher-tabs').children) button.onclick=()=>showTeacherView(button.dataset.view);
 $('monitor-question').onchange=()=>{monitorFollow=false;renderMonitor(current);renderTeacherReference(current);if(current.phase==='results')renderResults(current);};
 $('settings-form').oninput=$('settings-form').onchange=()=>{$('settings-form').dataset.dirty='true'; updateSetupStatus();};
-$('save-settings').onclick=()=>action($('save-settings'),async()=>{if(savingSettings) return; await saveAllSettings(); notice('所有設定已儲存。',true); await refresh();});
+$('save-settings').onclick=()=>action($('save-settings'),async()=>{
+  if(savingSettings) return;
+  window.courseNav.revealActivity();
+  await saveAllSettings(); notice('所有設定已儲存。',true); await refresh();
+});
 $('result-actions').append($('download-csv'));
 $('teacher-tabs').after($('sheet-export-controls'));
 for(const [id,title] of [['replay','重播搶答過程'],['classification','比較相似答案']]) {

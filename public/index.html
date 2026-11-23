@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="style.css">
   <script src="/share-code.js" defer></script>
   <script src="/activity-chat.js" defer></script>
+  <script src="/classroom-motion.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/workspace.js" defer></script>
 </head>
@@ -92,9 +93,14 @@
         <div class="session-main">
           <nav id="teacher-tabs" class="workspace-nav" aria-label="老師工作區" hidden><button data-view="settings">1 活動設定</button><button data-view="questions">2 題目與計分</button><button data-view="monitor">作答與批改</button><button data-view="results">搶答結果</button><button data-view="tools">更多工具</button></nav>
           <p id="setup-status" class="field-hint" aria-live="polite" hidden></p>
-          <div class="live-heading"><h2 id="content-title">準備作答</h2><span id="phase-label" class="phase-pill"></span></div>
+          <div class="live-heading"><h2 id="content-title" tabindex="-1">準備作答</h2><span id="phase-label" class="phase-pill"></span></div>
           <p id="phase-help" class="muted"></p><div id="grading-status" class="grading-status" hidden><p id="grading-message" role="status"></p><button id="grading-review" class="secondary" hidden>前往批改</button></div>
           <p id="round-status" class="integration-note" hidden></p>
+          <div id="priority-track" aria-hidden="true" hidden><span></span></div>
+          <div id="heartbeat-setting" hidden>
+            <label class="check-label"><input id="heartbeat-enabled" type="checkbox" autocomplete="off">保底倒數心跳聲</label>
+            <p id="heartbeat-error" class="field-hint" role="status" hidden></p>
+          </div>
           <p id="countdown" class="integration-note" hidden></p>
           <section id="own-score" class="score-card" aria-live="polite" hidden><span>本組目前總分</span><strong id="own-score-total">0 分</strong><p id="own-score-pending"></p><small id="own-score-parts"></small><small id="speed-rule"></small></section>
           <form id="settings-form" class="panel" hidden>

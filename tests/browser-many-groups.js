@@ -113,7 +113,7 @@ async (page) => {
     check(rows.length===6,'result missing question');
     rows.forEach((row,i)=>{
       check(row.number===`第 ${expected[i].question} 題`,'result question mismatch');
-      check(row.group===`${expected[i].group} · 搶答成功（未判定）`,'result winner mismatch');
+      check(row.group===`${expected[i].group} · 搶答成功（待批改）`,'result winner mismatch');
       check(row.answer===expected[i].text,'result answer mismatch');
     });
   }

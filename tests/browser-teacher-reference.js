@@ -118,6 +118,7 @@ async (page) => {
     await route.fulfill({response,json:state});
   });
   await page.evaluate(async()=>{await refresh();});
+  await page.locator('#sheet-sync-status[data-state="needs_auth"]').waitFor();
   check(await page.locator('#sheet-sync-help').evaluate(e=>!e.open),'Sync explanation not collapsed by default');
   check(await page.locator('#sheet-export').isVisible(),'Retry hidden with collapsed help');
   check((await page.locator('#sheet-sync-status').innerText()).includes('連線已失效'),'Auth failure not visible');
@@ -128,7 +129,7 @@ async (page) => {
   await page.setViewportSize({width:320,height:720});
   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Sync narrow overflow');
   await page.screenshot({path:'output/playwright/ui-sync-error-320.png',fullPage:true});
-  await page.unroute(base+path);
+  await page.unrouteAll({behavior:'wait'});
   await studentPage.close();
   check(!errors.length,errors.join('\n'));
   return {passed:true,checks:['closed-only','reference-override','cancel-restores-winner','polling-draft','switch-draft','reload-persistence','no-answers','student-report-score','all-mode','mobile-layout','student-immediate-reference','student-update-clear','student-reference-reload','student-previous-round','student-safe-text','student-mobile-layout','collapsed-sync-error-visible','sync-help-retained','sync-320px'],pageErrors:errors};

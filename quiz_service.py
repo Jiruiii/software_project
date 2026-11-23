@@ -397,9 +397,13 @@ class QuizService(ExtraFeatures):
                     info = json.loads(source["source_json"])
                     activity["source"] = {"sheet_title":info["sheet_title"], "url":f"https://docs.google.com/spreadsheets/d/{info['spreadsheet_id']}/edit",
                                           "exported_at":source["exported_at"], "export_stale":bool(info.get("last_export")) and not source["exported_at"]}
-                    activity["source"]["sync"] = self.sheet_sync_states.get(aid, {
-                        'state': 'synced' if source["exported_at"] else 'idle',
-                        'message': '已完成學習單同步。' if source["exported_at"] else '學習單會在關題後同步。'})
+                    from guided_notes import PROTECTED_TEMPLATES
+                    if info["spreadsheet_id"] in PROTECTED_TEMPLATES:
+                        activity["source"]["sync"] = {"state": "readonly", "message": "官方範本僅供讀取。如需寫回答案，請建立自己的副本並重新匯入。"}
+                    else:
+                        activity["source"]["sync"] = self.sheet_sync_states.get(aid, {
+                            'state': 'synced' if source["exported_at"] else 'idle',
+                            'message': '已完成學習單同步。' if source["exported_at"] else '學習單會在關題後同步。'})
                 activity["groups"] = [dict(r) for r in self.db.execute(
                     "SELECT id,name FROM groups WHERE activity_id=? ORDER BY name", (aid,))]
                 activity["answers"] = self._teacher_answers(aid)
@@ -408,6 +412,14 @@ class QuizService(ExtraFeatures):
                 activity["group_name"] = group["name"]
                 activity["answers"] = [self._own_answer(r, activity) for r in self.db.execute(
                     "SELECT * FROM answers WHERE activity_id=? AND group_id=? ORDER BY id", (aid, session["group_id"]))]
+                if self.courses and activity["answers"]:
+                    own_uid = self.courses.scope(token)["uid"]
+                    authors = dict(self.db.execute("""SELECT a.question_id,s.uid FROM answers a
+                        JOIN submitters s ON s.answer=a.id WHERE a.activity_id=? AND a.group_id=?""",
+                        (aid, session["group_id"])))
+                    for answer in activity["answers"]:
+                        if answer["question_id"] in authors:
+                            answer["submitted_by_me"] = authors[answer["question_id"]] == own_uid
             if activity["phase"] == "results":
                 winners = {}
                 for r in self._winner_rows(aid).values():

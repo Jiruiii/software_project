@@ -91,7 +91,9 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                     return self.respond(200, (ROOT / "public" / file).read_bytes(), mime + "; charset=utf-8")
                 if path == "/api/firebase-config":
                     return self.respond(200, accounts.config if accounts else {})
-            if self.command == "GET" and path in ("/workspace.js", "/activity-chat.js", "/share-code.js"):
+            if self.command == "GET" and path == "/priority-heartbeat.wav":
+                return self.respond(200, (ROOT / "public" / "priority-heartbeat.wav").read_bytes(), "audio/wav")
+            if self.command == "GET" and path in ("/workspace.js", "/activity-chat.js", "/share-code.js", "/classroom-motion.js"):
                 return self.respond(200, (ROOT / "public" / path[1:]).read_bytes(), "text/javascript; charset=utf-8")
             if self.command == "GET" and path in ("/", "/app.js", "/style.css", "/google-setup.html"):
                 file, mime = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css"), "/google-setup.html":("google-setup.html","text/html")}[path]

@@ -49,6 +49,27 @@ class BatchReviewTests(unittest.TestCase):
         self.s.review_batch(self.t, self.aid, '1', self.selections()[:1], 'incorrect')
         self.assertEqual(['incorrect', 'incorrect', 'pending'], self.verdicts())
 
+    def test_single_review_follows_whole_bundle_and_undo_revision(self):
+        self.s.db.execute("UPDATE activities SET phase='active' WHERE id=?", (self.aid,))
+        self.s.db.commit()
+        for token in self.students:
+            self.s.submit(token, self.aid, '2', 'child')
+        self.s.db.execute("UPDATE question_meta SET unit_id='1' WHERE activity_id=?", (self.aid,))
+        self.s.db.commit()
+        self.s.transition(self.t, self.aid, 'results')
+        answers = self.s.snapshot(self.t, self.aid)['answers']
+        by_group = {(a['group_name'], a['question_id']): a['id'] for a in answers}
+        b = self.s.review(self.t, self.aid, by_group['B', '1'], 'incorrect', 0)
+        self.assertFalse(b['displaced'])
+        a = self.s.review(self.t, self.aid, by_group['A', '2'], 'incorrect', 0)
+        self.assertTrue(a['displaced'])
+        self.assertEqual({'group_name': 'C', 'verdict': 'pending'}, a['candidate'])
+        with self.assertRaises(QuizError): self.s.undo_review_batch(self.s.login('test')['token'], self.aid, a['batch_id'])
+        self.s.undo_review_batch(self.t, self.aid, a['batch_id'])
+        self.assertEqual(['A','A'], [q['winner']['group_name'] for q in self.s.snapshot(self.t,self.aid)['results']])
+        self.s.review(self.t, self.aid, by_group['B', '1'], 'correct', 1)
+        with self.assertRaises(QuizError): self.s.undo_review_batch(self.t, self.aid, b['batch_id'])
+
     def test_invalid_and_stale_batches_are_atomic(self):
         selected = self.selections()
         for bad in [None, [], [selected[0], selected[0]], [selected[0], {'id':9999, 'revision':0}],

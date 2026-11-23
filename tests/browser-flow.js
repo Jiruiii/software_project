@@ -1,6 +1,6 @@
 // Run with playwright-cli run-code --filename tests/browser-flow.js against QA server.
 async (page) => {
-  const base = 'http://127.0.0.1:8765';
+  const base = new URL(page.url()).origin;
   const check = (value, message) => {if (!value) throw new Error(message);};
   const errors = [];
   for (const existing of page.context().pages()) if (existing !== page) await existing.close();
@@ -14,8 +14,8 @@ async (page) => {
   await page.getByLabel('教師密碼', {exact:true}).fill('classroom-qa-only');
   await page.getByRole('button', {name:'進入教師空間'}).click();
   await page.getByLabel('活動名稱', {exact:true}).fill('課堂驗收・概念複習');
-  await page.getByLabel('題號 每行一題').fill('1\n2\n3');
-  await page.getByRole('button', {name:'建立並進入活動'}).click();
+  await page.getByLabel('幾題？').fill('3');
+  await page.getByRole('button', {name:'下一步：設定活動'}).click();
   await page.locator('#session-code').filter({hasText:/^[A-Z2-9]{6}$/}).waitFor();
   const code = await page.locator('#session-code').innerText();
   const studentA = await page.context().newPage();
@@ -28,7 +28,7 @@ async (page) => {
     await student.getByLabel('小組名稱', {exact:true}).fill(name);
     await student.getByRole('button', {name:'加入活動', exact:true}).click();
     await student.locator('#activity').waitFor({state:'visible'});
-    await student.locator('#answer-0').waitFor({state:'visible'});
+    await student.locator('#answer-0').waitFor({state:'attached'});
     check(await student.locator('#answer-0').isDisabled(), 'F-10: answers enabled before start');
   }
   // Timestamp actual DOM changes, excluding automation polling/round-trip delay.

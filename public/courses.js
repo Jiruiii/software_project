@@ -6,6 +6,14 @@ let authReady=false;
 let pageVersion=0;
 let leaderboardTimer;
 const phase = {preparing:'準備中', active:'作答中', results:'已結束'};
+function entryStatus(message='', retry=false) {
+  $('entry-message').textContent=message;
+  $('entry-state').hidden=!message;
+  $('entry-retry').hidden=!retry;
+  $('entry-signout').hidden=!retry || !auth?.currentUser;
+}
+$('entry-retry').onclick=()=>location.reload();
+$('entry-signout').onclick=()=>navigate('signout');
 function status(message = '') {
   $('notice').textContent = message;
   $('notice').hidden = !message;
@@ -354,8 +362,10 @@ for (const id of ['staff','student']) $(id).onclick=()=>{
 };
 async function init() {
   draw();
-  const config=await (await fetch('/api/firebase-config')).json();
-  if (!config.apiKey) {status('尚未設定 Google 登入。請依專案內 docs/firebase.md 完成 Firebase 設定，再重新啟動。'); return;}
+  const response=await fetch('/api/firebase-config');
+  if (!response.ok) throw Error('登入設定無法載入');
+  const config=await response.json();
+  if (!config.apiKey) {entryStatus('這個網站尚未開放 Google 登入。請聯絡課程管理員。',true); return;}
   const base='https://www.gstatic.com/firebasejs/10.14.1/';
   const [app,authentication]=await Promise.all([import(base+'firebase-app.js'),import(base+'firebase-auth.js')]);
   sdk=authentication; auth=sdk.getAuth(app.initializeApp(config));
@@ -369,10 +379,18 @@ async function init() {
   sdk.onAuthStateChanged(auth,async user=>{
     authReady=true;
     home=null; draw();
+    entryStatus(user?'正在載入你的課程…':'');
     const signout=sessionStorage.getItem('course.signout');
     sessionStorage.removeItem('course.signout');
     if(user && signout) {await sdk.signOut(auth); return;}
-    if (user) {try {await reload();} catch(error) {status(error.message); window.courseNav.render(profile(),{},navigate);}}
+    if (user) {
+      try {
+        await reload();
+        if(auth.currentUser===user) entryStatus();
+      } catch {
+        if(auth.currentUser===user) entryStatus('課程資料載入失敗，請重新載入。',true);
+      }
+    }
   });
 }
 async function leaveRoom() {
@@ -382,4 +400,4 @@ async function leaveRoom() {
     for (const key of Object.keys(sessionStorage)) if (key.startsWith('classroom.')) sessionStorage.removeItem(key);
   }
 }
-leaveRoom().then(init).catch(error=>status('登入服務無法載入。'+error.message));
+leaveRoom().then(init).catch(()=>entryStatus('暫時無法連上登入服務，請重新載入。',true));

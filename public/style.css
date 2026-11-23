@@ -146,6 +146,7 @@ form > button[type=submit], .course-home form > button { margin-top: 20px; }
 .has-workspace .course-heading::before, .has-workspace .course-heading::after, .has-workspace .board-caption { display: none; }
 .has-workspace .course-heading h1, .section-heading h1, .setup-guide h1 { max-width: none; margin: 0; font-size: 40px; font-weight: 700; }
 .has-workspace .entry-controls { padding: 0; }
+#content-title { scroll-margin-top: calc(var(--header-height) + 12px); }
 .work-rail { position: fixed; right: 0; top: var(--header-height); bottom: 0; z-index: 6; overflow-y: auto; width: var(--rail-width); padding: 20px 12px 32px; border-left: 1px solid var(--line); background: var(--soft); }
 .rail-heading, .profile-name { display: block; padding: 8px 12px; color: var(--muted); font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
 .rail-heading:not(:first-child), .rail-activity { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -381,6 +382,44 @@ td small { display: block; color: var(--muted); margin-block: 4px; }
   .activity-card strong { font-size: 16px; }
   .cluster-actions button { width: 100%; }
 }
+.review-receipt { margin-top: 8px; color: var(--board); }
+.review-stage {
+  position: relative; isolation: isolate; overflow: hidden; min-height: 57px;
+  padding: 8px 12px; border: 1px solid var(--line); background: var(--wash);
+}
+.review-caption, .review-outcome { display: block; }
+.review-caption { color: var(--muted); font-size: 12px; }
+.review-outcome { font-size: 14px; }
+.verdict-stamp {
+  display: inline-block; padding: 0 4px; border: 3px double currentColor; border-radius: 2px;
+  color: var(--green); font: 700 16px/1.25 var(--display-font); transform: rotate(-5deg);
+}
+.review-revert { margin: 0; padding: 2px 0; min-height: 34px; font-size: 13px; }
+.flying-answer, .kicking-shoe { position: absolute; pointer-events: none; }
+.flying-answer {
+  inset: 2px 4px; display: grid; align-content: center; padding: 4px 12px;
+  border: 1px solid var(--line); background: repeating-linear-gradient(0deg,var(--surface) 0 18px,var(--soft) 18px 19px);
+  color: var(--ink); transform-origin: 15% 72%; font-size: 13px; line-height: 1.4;
+}
+.flying-answer > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kicking-shoe { z-index: 1; width: 58px; height: 32px; right: 8%; top: 15%; transform-origin: 86% 10%; }
+.shoe-upper, .shoe-sole, .shoe-laces { position: absolute; display: block; }
+.shoe-upper {
+  inset: 1px 1px 5px; background: var(--board); border-radius: 55% 12% 4% 20%;
+  clip-path: polygon(0 84%,8% 68%,36% 53%,51% 15%,64% 4%,79% 26%,97% 8%,100% 100%,0 100%);
+}
+.shoe-sole { inset: auto 0 2px; height: 7px; border: 1.5px solid var(--board); background: var(--chalk); border-radius: 40% 12% 30% 55%; }
+.shoe-laces { left: 42%; top: 40%; width: 11px; height: 6px; border-block: 2px solid var(--chalk); transform: rotate(27deg); }
+#priority-track { width: min(240px,100%); margin: -4px 0 16px; background: var(--line); overflow: hidden; }
+#priority-track span { display: block; height: 4px; background: var(--green); transform-origin: left; }
+#heartbeat-setting label { width: fit-content; margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+.podium-slip {
+  display: inline-block; max-width: 100%; padding: 0 8px; background: var(--soft);
+  border-inline-start: 2px solid var(--wood); color: var(--ink); transform-origin: left;
+}
+[data-podium="1"] .podium-slip { background: var(--wash); border-color: var(--green); }
+.rank-star { display: inline-block; color: var(--green); margin-left: .3em; font-size: 1.12em; line-height: 1; }
 @media (prefers-reduced-motion: reduce) {
+  #priority-track { display: none; }
   *, *::before, *::after { scroll-behavior: auto; }
 }

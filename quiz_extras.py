@@ -342,20 +342,24 @@ class ExtraFeatures:
     def review(self, token, aid, answer_id, verdict, revision=None):
         from quiz_service import QuizError
         with self.lock, self.db:
-            self._auth(token, "teacher")
+            owner = self._auth(token, "teacher")["token_hash"]
             activity = self._activity(aid)
             if type(answer_id) is not int or verdict not in ("correct", "incorrect"):
                 raise QuizError(400, "請提供有效答案與判定。")
             answer = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND id=?", (aid, answer_id)).fetchone()
             if not answer: raise QuizError(404, "找不到這筆答案。")
-            if self.courses and (type(revision) is not int or revision != answer['review_revision']):
+            if (self.courses or revision is not None) and (type(revision) is not int or revision != answer['review_revision']):
                 raise QuizError(409, '批改版本已變更，請重新查看後再判定。')
             if not self._reviewable(activity, answer["question_id"]):
                 raise QuizError(409, "請先關閉此題或結束活動，再判定答案。")
-            self.db.execute("UPDATE answers SET verdict=?,review_revision=review_revision+1 WHERE id=?", (verdict, answer_id))
-            self._log_grades(token, [answer_id])
-            self._invalidate_sheet_export(aid)
-            return {"ok": True}
+            question = answer["question_id"]
+            before = self._winner_rows(aid).get(question) if verdict == "incorrect" else None
+            displaced = before is not None and before["id"] == answer_id
+            changes = [{"id": answer_id, "before": answer["verdict"], "revision": answer["review_revision"] + 1}]
+            saved = self._apply_review(token, owner, aid, changes, verdict)
+            next_answer = self._winner_rows(aid).get(question) if displaced else None
+            candidate = {k: next_answer[k] for k in ("group_name", "verdict")} if next_answer else None
+            return {"ok": True, **saved, "displaced": displaced, "candidate": candidate}
 
     def _log_grades(self, token, ids):
         if self.courses:
@@ -411,14 +415,17 @@ class ExtraFeatures:
                     raise QuizError(409, "部分答案已被批改；本次未變更任何答案，請重新比較。")
                 changes.append({"id":answer["id"], "before":answer["verdict"],
                                 "revision":answer["review_revision"] + 1})
-            self.db.executemany("UPDATE answers SET verdict=?,review_revision=? WHERE id=?",
-                                [(verdict, c["revision"], c["id"]) for c in changes])
-            batch_id = secrets.token_hex(16)
-            self._log_grades(token, [c['id'] for c in changes])
-            self.db.execute("INSERT INTO review_batches(id,activity_id,owner,changes_json) VALUES(?,?,?,?)",
-                            (batch_id, aid, owner, json.dumps(changes)))
-            self._invalidate_sheet_export(aid)
-            return {"batch_id":batch_id, "count":len(changes)}
+            return self._apply_review(token, owner, aid, changes, verdict)
+
+    def _apply_review(self, token, owner, aid, changes, verdict):
+        self.db.executemany("UPDATE answers SET verdict=?,review_revision=? WHERE id=?",
+                            [(verdict, c["revision"], c["id"]) for c in changes])
+        batch_id = secrets.token_hex(16)
+        self._log_grades(token, [c["id"] for c in changes])
+        self.db.execute("INSERT INTO review_batches(id,activity_id,owner,changes_json) VALUES(?,?,?,?)",
+                        (batch_id, aid, owner, json.dumps(changes)))
+        self._invalidate_sheet_export(aid)
+        return {"batch_id": batch_id, "count": len(changes)}
 
     @expire_first
     def undo_review_batch(self, token, aid, batch_id):

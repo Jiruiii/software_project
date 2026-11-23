@@ -13,6 +13,11 @@
     <div class="course-entry">
       <div class="course-heading"><h1 id="title">進入課堂</h1><p class="board-caption">小組搶答與課堂紀錄</p></div>
       <div class="entry-controls">
+        <div id="entry-state">
+          <p id="entry-message" class="muted" role="status">正在準備登入…</p>
+          <button id="entry-retry" type="button" class="secondary" hidden>重新載入</button>
+          <button id="entry-signout" type="button" class="text-button" hidden>切換帳號</button>
+        </div>
         <p id="notice" role="status" hidden></p>
         <nav id="login-roles" class="role-switch" aria-label="選擇身分" hidden><button id="student" aria-pressed="true">學生</button><button id="staff" aria-pressed="false">老師與助教</button></nav>
         <section id="login" hidden><h2 id="intro">登入你的小組</h2><p id="hint">使用自己的 Google 帳號登入，再加入或建立課程小組。</p><button id="google" class="primary" disabled>使用 Google 帳號登入</button></section>

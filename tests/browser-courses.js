@@ -13,8 +13,18 @@ async page => {
     return route.fulfill({contentType:'text/javascript',headers:{'Access-Control-Allow-Origin':'*'},body});
   });
   await page.evaluate(()=>{sessionStorage.fixture='teacher';});
-  await page.reload();
   const button=name=>page.getByRole('button',{name,exact:true});
+  let releaseConfig;
+  const configFailure=new Promise(resolve=>{releaseConfig=resolve;});
+  await page.route('**/api/firebase-config',async route=>{
+    await configFailure;
+    await route.fulfill({status:503,json:{error:'temporarily unavailable'}});
+  },{times:1});
+  await page.reload({waitUntil:'domcontentloaded'});
+  try {
+    await page.getByRole('status').filter({hasText:'正在準備登入'}).waitFor();
+  } finally { releaseConfig(); }
+  await button('重新載入').click();
   await page.context().grantPermissions(['clipboard-read','clipboard-write'],{origin:new URL(page.url()).origin});
   async function checkCopy(label, expected) {
     await page.bringToFront();
@@ -31,8 +41,13 @@ async page => {
     await rail.getByRole('link',{name,exact:true}).click();
   }
   await button('學生').click();
+  await page.route('**/api/account/home',route=>route.fulfill({status:503,json:{error:'請稍後再試'}}),{times:1});
   await button('使用 Google 帳號登入').click();
+  await page.getByRole('status').filter({hasText:'課程資料載入失敗'}).waitFor();
+  await page.screenshot({path:'output/playwright/course-login-retry.png'});
+  await button('重新載入').click();
   await page.getByRole('heading',{name:'我的課程'}).waitFor();
+  if(await button('重新載入').isVisible()) throw Error('恢復課程後仍顯示重試');
   await page.reload();
   await page.getByRole('heading',{name:'我的課程'}).waitFor();
   if(await page.locator('#login-roles').isVisible() || await rail.getByText('加入小組').count() || await page.locator('#workspace form').count()) throw Error('教師首頁角色或內容錯誤');
@@ -53,8 +68,32 @@ async page => {
   await page.locator('#session-code').waitFor();
   if(await page.locator('#session-code').innerText()!==code) throw Error('活動內課程代碼不一致');
   await checkCopy('課程代碼',code);
-  await page.locator('#start').click();
+  await page.setViewportSize({width:390,height:800});
+  const directory=button('工作區導覽');
+  async function fromDirectory(control) {
+    await directory.click();
+    await rail.locator(control).click();
+  }
+  async function expectContentFocus(id) {
+    await page.waitForFunction(expected=>document.activeElement.id===expected,id);
+    if(await directory.getAttribute('aria-expanded')!=='false') throw Error('活動目錄仍蓋住內容');
+  }
+  await fromDirectory('[data-view="questions"]');
+  await expectContentFocus('content-title');
+  await fromDirectory('[data-view="settings"]');
+  await page.locator('#quiz-duration').fill('3601');
+  await fromDirectory('#start');
+  await expectContentFocus('quiz-duration');
+  if(await page.locator('#start').getAttribute('hidden')!==null) throw Error('設定無效仍開始活動');
+  await page.locator('#quiz-duration').fill('0');
+  await fromDirectory('#save-settings');
+  await expectContentFocus('content-title');
+  await page.getByText('所有設定已儲存。').waitFor();
+  await fromDirectory('#start');
+  await expectContentFocus('content-title');
   await page.locator('#live-ranking').waitFor();
+  await page.screenshot({path:'output/playwright/course-mobile-started.png'});
+  await page.setViewportSize({width:1360,height:950});
   if(await page.locator('#activity-chat').isVisible()) throw Error('教師看到學生公用頻道');
   await page.locator('#end').click();
   if(await page.locator(':focus').getAttribute('value')!=='cancel') throw Error('預設焦點應在取消');
@@ -109,14 +148,32 @@ async page => {
   await page.getByText('請用系統的複製指令複製已選取的文字。').waitFor();
   if(await page.evaluate(()=>getSelection().toString())!==code) throw Error('未選取完整代碼');
   await page.evaluate(()=>{delete navigator.clipboard; delete document.execCommand;});
+  const peer=await page.context().newPage();
+  await peer.addInitScript(()=>{sessionStorage.fixture='teammate';sessionStorage.signed='1';});
+  await peer.goto(new URL('/#join',page.url()).href);
+  await peer.getByLabel('老師提供的課程代碼').fill(code);
+  await peer.getByLabel('小組名稱').fill('甲組');
+  await peer.getByLabel('小組密碼',{exact:true}).fill('wrong-pass');
+  await peer.getByRole('button',{name:'加入小組',exact:true}).click();
+  await peer.getByRole('status').filter({hasText:'小組名稱或密碼錯誤'}).waitFor();
+  await peer.getByLabel('小組密碼',{exact:true}).fill('class123');
+  await peer.getByRole('button',{name:'加入小組',exact:true}).click();
+  await peer.getByRole('button',{name:'生物 · 甲組'}).click();
+  await peer.getByRole('button',{name:/第一堂/}).click();
+  await peer.locator('#activity-chat summary').click();
   await page.locator('#activity-chat summary').click();
   await page.getByLabel('以「甲組」發言').fill('課堂討論');
   await page.locator('#chat-form button').click();
   await page.locator('#chat-log p').filter({hasText:'課堂討論'}).getByText('甲組',{exact:true}).waitFor();
+  await peer.locator('#chat-log p').filter({hasText:'課堂討論'}).getByText('甲組',{exact:true}).waitFor();
   await page.locator('#activity-chat summary').click();
   await page.locator('#answer-0').fill('測試答案');
   await page.locator('.question-card button').first().click();
   await page.waitForFunction(()=>current.answers.length===1);
+  await peer.locator('.saved-answer').first().filter({hasText:'測試答案'}).waitFor();
+  await peer.getByText('✓ 隊友已送出',{exact:true}).waitFor();
+  await page.getByText('✓ 已交卷',{exact:true}).waitFor();
+  await peer.close();
   await button('帳號選單').click();
   await page.locator('#work-menu').getByRole('link',{name:'作答紀錄'}).click();
   await page.locator('.record summary').click();
@@ -151,6 +208,7 @@ async page => {
   await page.locator('#end').click();
   await button('確認結束').click();
   await page.waitForFunction(()=>current.phase==='results');
+  await expectContentFocus('content-title');
   await button('帳號選單').click();
   await page.locator('#work-menu').getByRole('link',{name:'學生作答與批改'}).click();
   await page.locator('.record summary').click();
@@ -180,6 +238,29 @@ async page => {
   await button('帳號選單').click();
   await page.locator('#work-menu').getByRole('link',{name:'我的帳號資料'}).click();
   await checkCopy('帳號 UID','teacher');
+  await nav('我的課程');
+  await button('生物 · 授課教師').click();
+  await nav('建立課堂活動');
+  await page.locator('#activity-title').fill('逐題手機課堂');
+  await page.locator('#question-count').fill('2');
+  await page.locator('#create-form button').click();
+  await page.locator('#quiz-mode').selectOption('sequential');
+  await fromDirectory('#start');
+  await page.waitForFunction(()=>current.phase==='active' && current.round.round_open);
+  await fromDirectory('#close-round');
+  await expectContentFocus('content-title');
+  await page.waitForFunction(()=>!current.round.round_open);
+  await fromDirectory('#next-round');
+  await expectContentFocus('content-title');
+  await page.waitForFunction(()=>current.round.unit_id==='2' && current.round.round_open);
+  await fromDirectory('#end');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>!document.querySelector('#end-dialog').open);
+  if(!await rail.isVisible() || await page.locator(':focus').getAttribute('id')!=='end') throw Error('取消結束後應回到原控制');
+  await page.locator('#end').click();
+  await button('確認結束').click();
+  await expectContentFocus('content-title');
+  await page.waitForFunction(()=>current.phase==='results');
   await button('帳號選單').click();
   await page.locator('#work-menu').getByRole('button',{name:'登出 Google 帳號'}).click();
   await page.evaluate(()=>{sessionStorage.fixture='assistant';});
@@ -192,9 +273,10 @@ async page => {
   await page.getByRole('heading',{name:'我的課程'}).waitFor();
   if(await page.getByLabel('助教的帳號 UID').count() || await rail.getByText('加入助教').count()) throw Error('出現未授權的課程工具');
   await nav('學生作答與批改');
-  await page.locator('.record summary').click();
-  await page.locator('.answer-record').getByText('正確',{exact:true}).waitFor();
-  await button('前往批改').click();
+  const firstLesson=page.locator('.record').filter({has:page.locator('summary').filter({hasText:'第一堂'})});
+  await firstLesson.locator('summary').click();
+  await firstLesson.locator('.answer-record').getByText('正確',{exact:true}).waitFor();
+  await firstLesson.getByRole('button',{name:'前往批改'}).click();
   await button('甲組 第 1 題判為錯誤').click();
   await page.waitForFunction(()=>current.answers[0]?.verdict==='incorrect');
   await button('帳號選單').click();
@@ -205,5 +287,5 @@ async page => {
   await page.getByLabel('教師的帳號 UID').waitFor();
   await nav('分配舊活動');
   if(await page.getByLabel('教師的帳號 UID').count()) throw Error('管理表單混在同一頁');
-  return {passed:true, provider:'offline test fixture'};
+  return {passed:true, provider:'offline test fixture', loginRecovery:true, mobileTeacherActions:true, roles:['student','teacher','assistant','admin']};
 }

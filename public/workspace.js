@@ -40,9 +40,11 @@
     close(); rail.classList.toggle('unfold',open); toggle.setAttribute('aria-expanded',String(open));
   };
   document.addEventListener('pointerdown',event=>{
+    if(event.target.closest('dialog[open]')) return;
     if (!profile.contains(event.target) && !rail.contains(event.target) && event.target!==toggle) close();
   });
   document.addEventListener('keydown',event=>{
+    if(event.target.closest('dialog[open]')) return;
     if(event.key==='Escape' && (!menu.hidden || rail.classList.contains('unfold'))) {
       const trigger=menu.hidden?toggle:avatar; close(); trigger.focus();
     }
@@ -118,7 +120,12 @@
     railLogout.onclick=logout.onclick;
     rail.append(railLogout); menu.append(logout);
   }
-  window.courseNav={render, select(view) {
+  function revealActivity() {
+    if(!rail.classList.contains('unfold') || !toggle.offsetWidth) return;
+    close();
+    document.getElementById('content-title').focus();
+  }
+  window.courseNav={render, revealActivity, select(view) {
     for(const a of rail.querySelectorAll('a')) {
       if(a.dataset.view===view) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current');
     }
@@ -137,7 +144,7 @@
     tools.hidden=!sessionStorage.getItem('classroom.activity');
     tools.append(make('span','rail-heading','本場搶答'),tabs);
     document.getElementById('work-account-heading').before(tools);
-    tabs.addEventListener('click',close);
+    tabs.addEventListener('click',revealActivity);
     if(owner) {
       tools.append(document.getElementById('teacher-controls'),document.getElementById('round-controls'));
     }
