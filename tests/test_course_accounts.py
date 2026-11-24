@@ -236,7 +236,8 @@ class CourseTests(unittest.TestCase):
         for actor in ("admin", "second"):
             home = self.call(actor, "home")
             self.assertTrue(home["admin"])
-            self.assertIn(self.legacy, [a["id"] for a in home["legacy"]])
+            self.assertNotIn("legacy", home)
+            self.assertNotIn("destinations", home)
         outsider = self.call("Second", "home", admin=True)
         self.assertFalse(outsider["admin"])
         self.assertNotIn("destinations", outsider)
@@ -247,8 +248,8 @@ class CourseTests(unittest.TestCase):
             self.call("second", "leaderboard", course=self.course)
         self.call("second", "grant", uid="Second")
         self.assertTrue(self.call("Second", "home")["teacher"])
-        self.call("second", "claim", course=self.course, aid=self.legacy)
-        self.assertEqual(self.s.snapshot(self.teacher, self.legacy)["title"], "舊活動")
+        with self.assertRaises(QuizError):
+            self.call("second", "claim", course=self.course, aid=self.legacy)
 
         self.accounts = Courses(self.s, web, "admin", verify)
         self.assertFalse(self.call("second", "home")["admin"])
@@ -378,7 +379,7 @@ class CourseTests(unittest.TestCase):
                 finally:
                     conn.close()
 
-    def test_permission_and_legacy_transfer(self):
+    def test_removed_transfer_preserves_existing_memberships(self):
         with self.assertRaises(QuizError):
             self.call("student", "grant", uid="student")
         with self.assertRaises(QuizError):
@@ -387,7 +388,11 @@ class CourseTests(unittest.TestCase):
             self.call("student", "course", course=self.course, staff=True)
         with self.assertRaises(QuizError):
             self.call("teacher", "claim", aid=self.legacy, course=self.course)
-        self.call("admin", "claim", aid=self.legacy, course=self.course)
+        with self.assertRaises(QuizError):
+            self.call("admin", "claim", aid=self.legacy, course=self.course)
+        self.assertIsNone(self.accounts.one("SELECT aid FROM lessons WHERE aid=?", self.legacy))
+        # Simulate a course association saved by an earlier release.
+        self.s.db.execute("INSERT INTO lessons VALUES(?,?)", (self.legacy, self.course))
         self.assertEqual(self.s.snapshot(self.teacher, self.legacy)["title"], "舊活動")
         with self.assertRaises(QuizError):
             self.call("admin", "claim", aid=self.legacy, course=self.other)

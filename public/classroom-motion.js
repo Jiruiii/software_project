@@ -194,11 +194,7 @@ const classroomMotion = (() => {
     const stage = ticket.node.querySelector('.review-stage');
     if (reduced.matches || !stage.animate || !stage.getClientRects().length) return;
     if (ticket.effect === 'stamp') {
-      animate(stage.querySelector('.verdict-stamp'), [
-        {transform:'scale(1.14) rotate(-9deg)', opacity:0},
-        {transform:'scale(.94) rotate(-5deg)', opacity:1, offset:.55},
-        {transform:'scale(1) rotate(-5deg)'}
-      ], 490);
+      stampAnimation(stage.querySelector('.verdict-stamp'));
       return;
     }
     if (!['erase','restore'].includes(ticket.effect)) return;
@@ -313,6 +309,24 @@ const classroomMotion = (() => {
       ],300);
     }
   }
+  function stampAnimation(stamp) {
+    animate(stamp, [
+      {transform:'scale(1.14) rotate(-9deg)', opacity:0},
+      {transform:'scale(.94) rotate(-5deg)', opacity:1, offset:.55},
+      {transform:'scale(1) rotate(-5deg)'}
+    ], 490);
+  }
+  function studentVerdicts(previous,state) {
+    if(state.role!=='student' || previous?.id!==state.id || reduced.matches) return;
+    const before=new Map(previous.answers.map(a=>[a.question_id,a.verdict]));
+    const changed=state.answers.filter(a=>a.verdict==='correct' && before.get(a.question_id)!=='correct');
+    if(!changed.length) return;
+    const questions=new Set(changed.map(a=>a.question_id));
+    const entries=state.phase==='results'?$('report-table'):$('student-questions');
+    for(const stamp of entries.querySelectorAll('.student-stamp:not([hidden])')) {
+      if(questions.has(stamp.closest('[data-question]').dataset.question)) stampAnimation(stamp);
+    }
+  }
   function standings(previous,state) {
     const final = state.phase==='results' && state.grading.complete;
     if (!final) {podiumObserver?.disconnect(); podiumObserver=null; return;}
@@ -330,5 +344,5 @@ const classroomMotion = (() => {
     });
     podiumObserver.observe($('scoreboard-table'));
   }
-  return {reset, review, mountReview, countdown, priority, submitted, standings};
+  return {reset, review, mountReview, countdown, priority, submitted, studentVerdicts, standings};
 })();

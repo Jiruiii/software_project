@@ -59,6 +59,11 @@ def main():
         connection = FakeGoogle()
         flow = SheetsWorkflow(service, connection)
         activity = flow.import_activity(teacher, flow.preview(teacher, COPY_URL)['preview_id'], '自動同步驗收')
+        if suite == 'auto-sync':
+            from copy import deepcopy
+            second = deepcopy(connection.data['sheets'][0])
+            second['properties'].update(title='第二張學習單', sheetId=2)
+            connection.data['sheets'].append(second)
         service.configure(teacher, activity['id'], 'sequential')
         service.question_settings(teacher, activity['id'], '2', True,
                                   [{'question':'2','type':'choice','options':['正解','錯誤選項'],'correct_index':0}])
@@ -92,8 +97,13 @@ def main():
         if suite == 'auto-sync':
             written = [r['updateCells']['rows'][0]['values'][0]['userEnteredValue']['stringValue']
                        for _, body in connection.writes for r in body['requests']]
-            if written != ['最快答案（最快組）', '第二快答案（第二組）', '', '最快答案（最快組）', '正解（第二組）']:
+            if written != ['最快答案（最快組）', '第二快答案（第二組）', '', '最快答案（最快組）', '正解（第二組）', '第二張答案（分頁組）']:
                 raise AssertionError('Unexpected sheet write sequence: '+repr(written))
+            first, second = connection.data['sheets']
+            for sheet, expected in [(first, written[0]), (second, written[-1])]:
+                cell = sheet['data'][0]['rowData'][4]['values'][6]
+                if cell['userEnteredValue']['stringValue'] != expected:
+                    raise AssertionError('Answer written to the wrong worksheet')
             report['verifiedWriteSequence'] = written
             report['googleMode'] = 'in-memory REST fixture; no live Google write'
         if suite == 'teacher-reference':

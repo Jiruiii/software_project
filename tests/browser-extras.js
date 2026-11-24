@@ -50,11 +50,16 @@ async (page) => {
   check(await student.locator('#answer-0').inputValue()==='測試答案','draft not restored');
   stage='line 27';
   check(await student.locator('#stake-0').inputValue()==='3','draft stake not restored');
+  await student.route('**/api/activities/*/answers', route=>route.abort(),{times:1});
+  await student.locator('.question-card').first().locator('button').click();
+  await student.locator('#notice').filter({hasText:'尚未收到，請重新送出'}).waitFor();
+  check(await student.locator('#answer-0').inputValue()==='測試答案','Missing receipt erased draft');
   await student.route('**/api/activities/*/answers', async route=>{await route.fetch(); await route.abort();});
   stage='line 29';
   await student.locator('.question-card').nth(0).locator('button').click();
   stage='line 30';
   await student.waitForFunction(()=>document.querySelector('.question-card').classList.contains('sent'));
+  await student.locator('#notice').filter({hasText:'已收到本組第 1 題的答案'}).waitFor();
   stage='line 31';
   await student.unroute('**/api/activities/*/answers');
   stage='line 32';
@@ -135,7 +140,7 @@ async (page) => {
   stage='line 69';
   await student.waitForFunction(()=>document.querySelector('#report-table').textContent.includes('老師提供的參考答案'));
   stage='line 70';
-  check((await student.locator('#report-table').innerText()).includes('正確'),'report verdict missing');
+  check(await student.locator('#report-table .student-stamp').first().isVisible(),'report correct stamp missing');
   stage='line 71';
   const reportDownload=student.waitForEvent('download'); await student.locator('#download-report').click();
   stage='line 72';
@@ -165,6 +170,8 @@ async (page) => {
   await page.locator('#start').click(); await student.waitForFunction(()=>!document.querySelector('#answer-0').disabled);
   stage='line 84';
   check(await student.locator('.question-card').count()===4,'bundle split into separate cards');
+  await page.locator('#guide-round').filter({hasText:'全部題目作答中'}).waitFor();
+  check(await page.locator('#guide-timeline button[data-state="作答中"]').count()===4,'全題模式未按題組顯示開放狀態');
   const bundle=student.locator('.question-card').first();
   stage='line 86';
   await bundle.locator('textarea').nth(0).fill('子題一'); await bundle.locator('button').click();
@@ -172,6 +179,7 @@ async (page) => {
   check(await bundle.locator('textarea').nth(1).evaluate(e=>!e.validity.valid),'missing child accepted');
   stage='line 88';
   await bundle.locator('textarea').nth(1).fill('子題二'); await bundle.locator('.stake').selectOption('2');
+  await bundle.getByText('整組全對 +2 分；任一小題錯 −2 分，只扣一次。').waitFor();
   stage='line 89';
   await student.reload(); await student.waitForFunction(()=>!document.querySelector('#answer-0').disabled);
   stage='line 90';
@@ -185,6 +193,8 @@ async (page) => {
   await page.locator('#teacher-tabs [data-view="monitor"]').click();
   stage='line 94';
   await page.getByRole('button',{name:'題組學生 第 1.1 題判為正確',exact:true}).click();
+  await student.locator('#report-table tr[data-question="1.1"] .student-stamp').waitFor();
+  check(await student.locator('#report-table tr[data-question="1.2"] .student-stamp').count()===0,'一個子題判對使相鄰子題出現正解章');
   stage='line 95';
   await page.getByRole('button',{name:'題組學生 第 1.2 題判為正確',exact:true}).click();
   stage='line 96';

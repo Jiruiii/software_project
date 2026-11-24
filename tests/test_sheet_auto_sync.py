@@ -157,7 +157,7 @@ class AutoSyncTests(unittest.TestCase):
         self.s.transition(self.t, second['id'], 'results'); self.auto.run_once()
         self.assertEqual('all mode（C）', self.value())
 
-    def test_grouped_round_uses_same_fallback_group(self):
+    def test_grouped_round_syncs_only_the_reviewed_child(self):
         grid = from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]
         self.g.data = payload(grid)
         source = parse_grid(grid); source['spreadsheet_id'] = 'test-grouped-auto-id-12345'
@@ -168,10 +168,36 @@ class AutoSyncTests(unittest.TestCase):
         self.s.submit_unit(first, aid, '1', {'1.1':'a1','1.2':'a2'}, 1)
         self.s.submit_unit(second, aid, '1', {'1.1':'b1','1.2':'b2'}, 1)
         self.s.round_action(self.t, aid, 'close'); self.auto.run_once()
-        answer = self.s.snapshot(self.t, aid)['answers'][0]
-        self.s.review(self.t, aid, answer['id'], 'incorrect'); self.auto.run_once()
-        targets = [t for t in source['targets'] if t['unit']=='1']
-        self.assertEqual(['b1（second）','b2（second）'], [self.value(t['row'],t['col']) for t in targets])
+        answers = {(a['group_name'], a['question_id']): a for a in self.s.snapshot(self.t, aid)['answers']}
+        targets = {t['question']: t for t in source['targets'] if t['unit']=='1'}
+
+        def check_cells(first_child, second_child):
+            for q, expected in [('1.1', first_child), ('1.2', second_child)]:
+                target = targets[q]
+                self.assertEqual(expected, self.value(target['row'], target['col']), q)
+
+        check_cells('a1（first）', 'a2（first）')
+        self.s.review(self.t, aid, answers['first','1.1']['id'], 'incorrect')
+        self.auto.run_once()
+        check_cells('b1（second）', 'a2（first）')
+        writes = self.g.writes[-1][1]['requests']
+        self.assertEqual([(targets['1.1']['row'], targets['1.1']['col'])],
+                         [(w['updateCells']['start']['rowIndex'], w['updateCells']['start']['columnIndex']) for w in writes])
+
+        # Each group now has one incorrect child, but each cell still has a candidate.
+        self.s.review(self.t, aid, answers['second','1.2']['id'], 'incorrect')
+        self.auto.run_once()
+        check_cells('b1（second）', 'a2（first）')
+        last = answers['second','1.1']
+        batch = self.s.review_batch(self.t, aid, '1.1', [{'id':last['id'], 'revision':last['review_revision']}], 'incorrect')
+        self.auto.run_once()
+        check_cells(targets['1.1']['original'], 'a2（first）')
+        self.s.undo_review_batch(self.t, aid, batch['batch_id'])
+        self.auto.run_once()
+        check_cells('b1（second）', 'a2（first）')
+        self.s.review(self.t, aid, answers['first','1.1']['id'], 'correct')
+        self.auto.run_once()
+        check_cells('a1（first）', 'a2（first）')
 
     def test_official_and_structure_changes_remain_protected(self):
         self.close_first()

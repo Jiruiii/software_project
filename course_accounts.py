@@ -139,13 +139,6 @@ class Courses:
                     uid,
                 ),
             }
-            if admin:
-                result["legacy"] = self.rows(
-                    "SELECT id,title FROM activities WHERE id NOT IN (SELECT aid FROM lessons)"
-                )
-                result["destinations"] = self.rows(
-                    "SELECT c.id,c.title,p.email FROM courses c JOIN people p ON p.uid=c.owner"
-                )
             return result
         if action in ("grant", "assistant"):
             if not (admin if action == "grant" else role == "owner"):
@@ -157,15 +150,6 @@ class Courses:
                 self.db.execute("UPDATE people SET teacher=1 WHERE uid=?", (target,))
             else:
                 self.db.execute("INSERT OR IGNORE INTO assistants VALUES(?,?)", (course, target))
-        elif action == "claim":
-            if not admin:
-                raise QuizError(403, "只有管理員能將未歸屬活動加入課程。")
-            aid = text(data.get("aid"), "活動", 64)
-            if not self.one("SELECT 1 FROM courses WHERE id=?", course) or not self.one(
-                "SELECT 1 FROM activities WHERE id=? AND id NOT IN (SELECT aid FROM lessons)", aid
-            ):
-                raise QuizError(409, "請選擇尚未歸屬任何課程的活動，以及已建立的課程。")
-            self.db.execute("INSERT INTO lessons VALUES(?,?)", (aid, course))
         elif action == "create-course":
             if not teacher:
                 raise QuizError(403, "請先由管理員指定教師資格。")
@@ -294,6 +278,8 @@ class Courses:
             **room,
             "activity_id": aid,
             "course": course,
+            "uid": uid,
+            **({"enrollment": team["enrollment"]} if action == "student-room" else {}),
             "assistant": action == "staff-room" and role == "assistant",
         }
 

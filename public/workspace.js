@@ -131,14 +131,15 @@
       };
       parent.append(a);
     }
-    link(primary,'home',staff?'我的課程':'我的小組');
+    link(primary,'home','我的課程');
     if(staff===false) {
       link(primary,'join','加入小組');
       link(primary,'create-team','建立小組');
     }
     if(teacher) link(primary,'create-course','新增課程');
     const records=staff?'學生作答與批改':'作答紀錄';
-    link(primary,'history',records);
+    const historyView=courseId?'history/'+courseId:'history';
+    link(primary,historyView,records);
     if(staff===false || teacher || owner) {
       const current=courseId && (!staff || owner);
       link(primary,current?'leaderboard/'+courseId:'leaderboard','課程排行榜');
@@ -148,7 +149,7 @@
       const courseLinks=group('work-course-links',courseTitle || '目前課程');
       link(courseLinks,path,'課程活動');
       if(owner) {
-        link(courseLinks,path+'/new-activity','建立課堂活動');
+        link(courseLinks,path+'/new-activity','建立搶答活動');
         link(courseLinks,path+'/assistant','加入助教');
         link(courseLinks,path+'/password','重設小組密碼');
       }
@@ -156,9 +157,8 @@
     if(admin) {
       const adminLinks=group('work-admin-links','管理工具');
       link(adminLinks,'admin','授予教師資格');
-      link(adminLinks,'legacy','將未歸屬活動加入課程');
     }
-    if(!staff) link(menu,'history',records);
+    if(!staff) link(menu,historyView,records);
     link(menu,'account','我的帳號資料');
     const logout=make('button','work-link','登出 Google 帳號');
     logout.id='signout';

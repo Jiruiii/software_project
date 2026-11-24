@@ -3,19 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>課間｜課堂搶答</title>
-  <meta name="description" content="建立課堂活動、送出小組答案，查看搶答結果與批改紀錄。">
+  <title>課堂搶答</title>
+  <meta name="description" content="建立搶答活動、送出小組答案，查看搶答結果與批改紀錄。">
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="style.css">
   <script src="/share-code.js" defer></script>
   <script src="/activity-chat.js" defer></script>
+  <script src="/classroom-drafts.js" defer></script>
   <script src="/classroom-motion.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/workspace.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="課間首頁"><span class="book-mark" aria-hidden="true"></span>課間<span class="brand-detail">課堂搶答</span></a>
+    <a class="brand" href="/" aria-label="課堂搶答首頁"><span class="book-mark" aria-hidden="true"></span>課堂搶答</a>
     <div class="top-actions"><span id="connection" class="connection">本機課堂</span><button id="logout" class="text-button" hidden>離開此身分</button></div>
   </header>
   <main>
@@ -26,14 +27,14 @@
       <div class="entry-card">
         <div class="role-switch" role="group" aria-label="選擇身分"><button id="choose-student" aria-pressed="true">我是學生</button><button id="choose-teacher" aria-pressed="false">我是老師</button></div>
         <form id="join-form">
-          <h2>加入課堂活動</h2><p class="muted">輸入老師提供的活動代碼與組名。</p>
+          <h2>加入搶答活動</h2><p class="muted">輸入老師提供的活動代碼與組名。</p>
           <label for="join-code">活動代碼</label><input id="join-code" name="code" maxlength="6" minlength="6" placeholder="例如 ABC234" autocomplete="off" required>
           <label for="join-group">小組名稱</label><input id="join-group" name="group" maxlength="40" placeholder="例如 第 1 組" required>
           <p class="field-hint">同組同學請使用相同名稱，共同送出一份答案。</p>
           <button type="submit" class="primary wide">加入活動</button>
         </form>
         <form id="login-form" hidden>
-          <h2>登入教師工作台</h2><p class="muted">建立活動、查看小組作答與公布結果。</p>
+          <h2>登入教師工作台</h2><p class="muted">建立搶答活動、查看小組作答與公布結果。</p>
           <label for="teacher-password">教師密碼</label><input id="teacher-password" name="password" type="password" placeholder="啟動服務時設定的密碼" autocomplete="current-password" required>
           <p class="field-hint">教師專用。學生只需要活動代碼即可加入。</p>
           <button type="submit" class="primary wide">進入教師空間</button>
@@ -45,7 +46,7 @@
       <div class="section-heading"><h1>教師工作台</h1></div>
       <div class="dashboard-grid">
         <div id="create-panel" class="panel">
-          <div class="panel-heading"><h2>建立新活動</h2></div>
+          <div class="panel-heading"><h2>建立搶答活動</h2></div>
           <div class="source-switch" role="group" aria-label="建立方式"><button id="source-manual" type="button" aria-pressed="true">直接建立</button><button id="source-sheets" type="button" aria-pressed="false">匯入 Google 學習單</button></div>
         <form id="create-form">
           <label for="activity-title">活動名稱</label><input id="activity-title" maxlength="100" placeholder="例如 第三週・課堂討論" required>
@@ -55,11 +56,11 @@
           <button class="primary wide" type="submit">下一步：設定活動</button>
         </form>
         </div>
-        <div class="panel"><div class="panel-heading"><h2>我的課堂活動</h2><span id="activity-count" class="count">0</span></div><div id="activity-list"></div></div>
+        <div class="panel"><div class="panel-heading"><h2>我的搶答活動</h2><span id="activity-count" class="count">0</span></div><div id="activity-list"></div></div>
       </div>
       <section id="sheets-create" class="sheets-panel" hidden>
-        <p class="muted">匯入學習單題號，活動結束後可將成功答案寫回原表。</p>
-        <div class="google-controls"><span id="google-status" class="muted">檢查 Google 設定中…</span><button id="google-connect" class="text-button">連線 Google</button><button id="google-disconnect" class="text-button" hidden>中斷 Google 連線</button><a href="/google-setup.html" target="_blank" rel="noopener" class="text-button">首次設定說明</a></div>
+        <p class="muted">核對工作表與題號後建立搶答活動。逐題模式在關題時寫回答案，全題模式在活動結束時寫回。</p>
+        <div class="google-controls"><span id="google-status" class="muted">檢查 Google 設定中…</span><button id="google-connect" class="text-button">連線 Google</button><button id="google-disconnect" class="text-button" hidden>中斷 Google 連線</button><a href="/google-setup.html" target="_blank" rel="noopener" class="text-button">學習單匯入說明</a></div>
         <a id="google-auth-link" class="primary" target="_blank" rel="noopener" hidden>開啟 Google 授權頁</a>
         <form id="sheet-preview-form">
           <label for="sheet-url">Google Sheets 連結</label><input id="sheet-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/…/edit" required>
@@ -68,26 +69,32 @@
         </form>
         <div id="sheet-preview" hidden><h3 id="sheet-preview-title"></h3><p id="sheet-preview-warning" class="integration-note"></p><div id="sheet-preview-table" class="table-scroll"></div>
           <label for="sheet-activity-title">匯入後的活動名稱</label><input id="sheet-activity-title" maxlength="100" placeholder="例如 第四週・學習單搶答">
-          <button id="sheet-import" class="primary">確認題號，建立活動</button>
+          <button id="sheet-import" class="primary">確認題號，建立搶答活動</button>
         </div>
         <p class="field-hint">官方範本：<a href="https://docs.google.com/spreadsheets/d/12uh5xhIx2wXFMy42KU8lN7rLFQ8GDugt9zfAFEvu-1E/copy" target="_blank" rel="noopener">複製單題學習單</a>。先建立副本再貼上你的連結，答案才會寫回你自己的表。</p>
       </section>
     </section>
     <section id="activity" hidden>
       <button id="back" class="text-button back" hidden>返回活動清單</button>
-      <div class="section-heading"><div><h1 id="session-title"></h1><p id="session-subtitle" class="muted"></p></div><span id="role-badge" class="badge"></span></div>
+      <div class="section-heading"><div><h1 id="session-title"></h1><p id="session-subtitle" class="muted"></p></div><div class="session-actions"><span id="role-badge" class="badge"></span><button id="end" class="danger" hidden>結束搶答並公布結果</button></div></div>
       <div class="session-layout">
         <aside class="session-sidebar">
           <div class="code-block" id="session-code-block"></div>
           <ol class="phase-steps" aria-label="活動階段"><li data-phase="preparing"><span>01</span><div>準備中<small>加入小組，準備作答</small></div></li><li data-phase="active"><span>02</span><div>作答中<small>思考答案，即時送出</small></div></li><li data-phase="results"><span>03</span><div>結果<small>看看每題的搶答成果</small></div></li></ol>
-          <div id="teacher-controls" hidden><button id="save-settings" class="secondary">儲存設定</button><button id="start" class="primary">開始搶答</button><button id="end" class="danger" hidden>結束活動</button></div>
+          <div id="teacher-controls" hidden><button id="save-settings" class="secondary">儲存設定</button><button id="start" class="primary">開始搶答</button></div>
           <p id="session-rule" class="sidebar-note"></p>
           <details id="live-ranking" class="live-ranking" open hidden>
             <summary>本場前五名</summary>
             <p id="live-ranking-hint"></p>
             <ol id="live-ranking-rows" aria-label="本場小組排名"></ol>
           </details>
-          <div id="sheet-export-controls" class="sheet-sync-panel" hidden><div class="sheet-sync-heading"><strong id="source-name"></strong><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟學習單</a></div><div class="sheet-sync-feedback"><p id="sheet-sync-status" role="status"></p><button id="sheet-export" class="secondary" hidden>重試同步</button></div><details id="sheet-sync-help" class="inline-help"><summary>同步方式與連線說明</summary><p>關題後自動寫入最快未判錯組別；若指定老師答案，則優先使用老師答案。權限錯誤時，可在匯入頁查看授權方式。同步期間請勿移動原表列欄。</p></details></div>
+          <div id="sheet-export-controls" class="sheet-sync-panel" hidden><div class="sheet-sync-heading"><strong id="source-name"></strong><a id="source-link" class="text-button" target="_blank" rel="noopener">開啟學習單</a></div><div class="sheet-sync-feedback"><p id="sheet-sync-status" role="status"></p><button id="sheet-export" class="secondary" hidden>重試同步</button></div><details id="sheet-sync-help" class="inline-help"><summary>同步方式與連線說明</summary><p>關題後，每個小題會寫入最早交卷且該小題未被判錯的組別答案。若指定老師答案，則優先寫入老師答案。權限錯誤時，可在匯入頁查看授權方式。同步期間請勿移動原表列欄。</p></details></div>
+        </aside>
+        <aside id="review-guide" aria-label="批改題目導覽" hidden>
+          <div class="guide-heading"><h2>題目進度</h2><span id="guide-mode"></span></div>
+          <p id="guide-round"></p>
+          <ol id="guide-timeline" aria-label="各題開放進度"></ol>
+          <div id="guide-reading"><h3 id="guide-question"></h3><div id="guide-prompts"></div></div>
         </aside>
         <div class="session-main">
           <nav id="teacher-tabs" class="workspace-nav" aria-label="老師工作區" hidden><button data-view="settings">1 活動設定</button><button data-view="questions">2 題目與計分</button><button data-view="monitor">作答與批改</button><button data-view="results">搶答結果</button><button data-view="tools">更多工具</button></nav>
@@ -105,6 +112,7 @@
             <p id="countdown-sound-error" class="field-hint" role="status" hidden></p>
           </div>
           <section id="own-score" class="score-card" aria-live="polite" hidden><span>本組目前總分</span><strong id="own-score-total">0 分</strong><p id="own-score-pending"></p><small id="own-score-parts"></small><small id="speed-rule"></small></section>
+          <section id="group-report" class="panel" hidden><h3>本組學習報告</h3><p class="field-hint">題組得分只列於第一小題。</p><p class="report-scroll-help field-hint">左右捲動可查看完整紀錄。</p><div id="report-table" class="table-scroll" role="region" aria-label="本組學習報告明細" tabindex="0"></div><button id="download-report" class="primary">下載本組報告 CSV</button></section>
           <form id="settings-form" class="panel" hidden>
             <h3>怎麼進行這場搶答？</h3><label for="quiz-mode">開放方式</label>
             <select id="quiz-mode"><option value="all">全題同時開放</option><option value="sequential">逐題搶答</option></select>
@@ -126,7 +134,6 @@
           <div id="results" hidden></div>
           <section id="scoreboard" class="panel" hidden><h3>小組得分排行</h3><details class="inline-help scoring-help"><summary>計分方式</summary><p id="ranking-rule"></p></details><div id="scoreboard-table" class="table-scroll"></div></section>
           <details id="references" class="panel teacher-reference" hidden><summary id="reference-summary">老師正確答案（選填）</summary><p class="field-hint">儲存後學生立即可見，並保留於報告；不影響判分。</p><p id="reference-selection-help" class="field-hint" hidden></p><form id="reference-form"><label for="reference-answer">老師正確答案</label><textarea id="reference-answer" maxlength="2000" rows="3" placeholder="需要補充時再填寫，最多 2000 字"></textarea><label id="reference-override-field" class="check-label"><input id="reference-override" type="checkbox">用老師答案更新學習單</label><p id="reference-sheet-help" class="field-hint"></p><div class="form-actions"><button id="reference-save" class="primary">儲存老師答案</button><span id="reference-status" class="field-hint" role="status"></span></div></form></details>
-          <section id="group-report" class="panel" hidden><h3>本組學習報告</h3><p class="field-hint">題組得分只列於第一小題。</p><p class="report-scroll-help field-hint">左右捲動可查看完整紀錄。</p><div id="report-table" class="table-scroll" role="region" aria-label="本組學習報告明細" tabindex="0"></div><button id="download-report" class="primary">下載本組報告 CSV</button></section>
           <button id="download-csv" class="primary" hidden>下載活動 CSV</button>
           <section id="result-actions" class="panel" hidden><h3>匯出作答紀錄</h3></section>
           <section id="replay" class="panel" hidden>

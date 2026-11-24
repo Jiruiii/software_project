@@ -29,7 +29,10 @@ async page => {
     await student.locator('#answer-1').waitFor({state:'visible'});
     check(await page.locator('#monitor-question').inputValue()==='2','Shared selector did not follow');
     check(await page.locator('#reference-form').isHidden(),'Open question reference form editable');
-    await page.locator('#monitor-question').selectOption('1');check(await page.locator('#reference-answer').inputValue()==='第一題草稿','Draft lost');
+    await page.getByRole('button',{name:'查看第 1 題，已關閉'}).click();
+    check(await page.locator('#guide-question').innerText()==='正在查看 · 第 1 題','查看題號未切換');
+    check(await page.locator('#guide-timeline [aria-current="step"] strong').innerText()==='2','回看改動了目前回合');
+    check(await page.locator('#reference-answer').inputValue()==='第一題草稿','Draft lost');
     check((await page.locator('#monitor-table').innerText()).includes('第一題回答'),'Monitor disagrees');
     await page.locator('#reference-save').click();await page.waitForFunction(()=>current.references['1']==='第一題草稿');
     await page.locator('#monitor-question').selectOption('2');
@@ -52,7 +55,10 @@ async page => {
     const batch=await post(path+'/review-batch',{question:'2',selections:[{id:answer.id,revision:answer.review_revision}],verdict:'correct'});
     await student.waitForFunction(()=>current.grading.complete);await page.waitForFunction(()=>current.grading.complete);
     check((await student.locator('#group-report h3').innerText()).includes('批改完成'),'Report not finalized');
+    const reportStamp=q=>student.locator(`#report-table tr[data-question="${q}"] .student-stamp`);
+    await reportStamp('1').waitFor(); await reportStamp('2').waitFor();
     await post(path+'/review-undo',{batch_id:batch.batch_id});await student.waitForFunction(()=>!current.grading.complete);await page.waitForFunction(()=>!current.grading.complete);
+    await reportStamp('2').waitFor({state:'detached'}); await reportStamp('1').waitFor();
     await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,0));
     check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Teacher mobile overflow');
     await page.screenshot({path:'output/playwright/review-flow-mobile.png',fullPage:true});

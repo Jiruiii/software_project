@@ -11,6 +11,12 @@ async (page) => {
   await page.locator('#login-form button').click();
   await page.locator('#dashboard').waitFor({state:'visible'});
   await page.locator('#source-sheets').click();
+  const [guide]=await Promise.all([
+    page.waitForEvent('popup'), page.getByRole('link',{name:'學習單匯入說明'}).click()
+  ]);
+  await guide.getByRole('heading',{name:'核對工作表與題號'}).waitFor();
+  check(await guide.getByRole('heading',{name:'建立 Google Cloud 專案'}).isHidden(),'本機管理員設定應預設收合');
+  await guide.close();
   await page.locator('#google-connect').click();
   await page.locator('#notice').filter({hasText:'尚未設定 Google OAuth'}).waitFor();
   await page.locator('#sheet-url').fill('https://docs.google.com/spreadsheets/d/12uh5xhIx2wXFMy42KU8lN7rLFQ8GDugt9zfAFEvu-1E/edit');

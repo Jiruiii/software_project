@@ -4,7 +4,7 @@ let staff = false;
 let auth, sdk, home;
 let authReady=false;
 let pageVersion=0;
-let leaderboardTimer;
+let leaderboardTimer,courseTimer;
 const phase = {preparing:'準備中', active:'作答中', results:'已結束'};
 function entryStatus(message='', retry=false) {
   $('entry-message').textContent=message;
@@ -37,10 +37,49 @@ function button(parent, title, fn, cls='secondary') {
   parent.append(b);
   return b;
 }
-function listEntry(parent, title, detail, open, phaseName) {
-  const row = button(parent,'',open,'activity-card course-row');
-  row.setAttribute('aria-label',title+' · '+detail);
-  row.append(node('strong',title),node('span',detail,phaseName ? 'phase-pill '+phaseName : 'row-detail'));
+let galleryObserver;
+function gallery(section,title,count) {
+  const heading=node('div',undefined,'index-heading');
+  const label=node('h2',title), controls=node('div',undefined,'gallery-controls');
+  const amount=node('span',count,'count'), track=node('div',undefined,'card-track');
+  track.setAttribute('role','region'); track.setAttribute('aria-label',title);
+  const arrows=[[-1,'上一張'],[1,'下一張']].map(([direction,name])=>{
+    const b=node('button',direction<0?'‹':'›','gallery-arrow');
+    b.type='button'; b.setAttribute('aria-label',name+' · '+title);
+    b.onclick=event=>{
+      const stride=track.firstElementChild.offsetWidth+parseFloat(getComputedStyle(track).columnGap);
+      const smooth=event.detail>0 && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+      track.scrollBy({left:direction*stride,behavior:smooth?'smooth':'instant'});
+    };
+    controls.append(b); return b;
+  });
+  function update() {
+    const max=track.scrollWidth-track.clientWidth;
+    controls.hidden=max<=2;
+    arrows[0].disabled=track.scrollLeft<=2; arrows[1].disabled=track.scrollLeft>=max-2;
+  }
+  heading.append(label,amount,controls); section.append(heading,track);
+  track.addEventListener('scroll',update,{passive:true});
+  galleryObserver=new ResizeObserver(update); galleryObserver.observe(track);
+  return {track,amount,update};
+}
+function galleryCard(track,title,detail,open,kind,caption,detailLabel='') {
+  const card=node(open?'button':'article',undefined,'gallery-card '+kind);
+  if(open) {
+    card.type='button';
+    card.onclick=()=>run(card,open);
+    card.setAttribute('aria-label',title+' · '+detail);
+  }
+  const cover=node('span',undefined,'card-cover');
+  cover.append(node('span',caption,'card-caption'));
+  const body=node('span',undefined,'card-body');
+  body.append(node('strong',title),node('span',detailLabel+detail,'card-detail'));
+  card.append(cover,body); track.append(card);
+  return card;
+}
+function toolbar(section) {
+  const bar=node('div',undefined,'course-toolbar'); section.append(bar);
+  return bar;
 }
 function panel(title) {
   const section = node('section',undefined,'panel');
@@ -61,11 +100,11 @@ function form(section, fields, submit, fn) {
   f.append(b); section.append(f);
   f.onsubmit = e => {e.preventDefault(); run(b,()=>fn(Object.fromEntries(new FormData(f))));};
 }
-async function api(action,data={}) {
+async function api(action,data={},signal) {
   const token = await auth.currentUser.getIdToken();
-  const response = await fetch('/api/account/'+action,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(data)});
+  const response = await fetch('/api/account/'+action,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(data),signal});
   const result = await response.json();
-  if (!response.ok) throw Error(result.error || '操作失敗，請重試。');
+  if (!response.ok) throw Object.assign(Error(result.error || '操作失敗，請重試。'),{status:response.status});
   return result;
 }
 async function reload(message) {
@@ -78,13 +117,15 @@ async function reload(message) {
 }
 function draw() {
   ++pageVersion;
+  galleryObserver?.disconnect();
   clearTimeout(leaderboardTimer);
+  clearTimeout(courseTimer);
   $('workspace').replaceChildren();
   staff = home ? (home.teacher || home.admin || home.teaching.length > 0) : loginAsStaff;
   $('login-roles').hidden = !authReady || !!auth?.currentUser;
   $('student').setAttribute('aria-pressed',String(!staff));
   $('staff').setAttribute('aria-pressed',String(staff));
-  $('title').textContent = home ? (staff ? '我的課程' : '我的小組') : '進入課堂';
+  $('title').textContent = home ? '我的課程' : '進入課堂';
   $('login').hidden = $('login-roles').hidden;
   const view=location.hash.slice(1) || 'home';
   const [page,id,task]=view.split('/');
@@ -112,15 +153,15 @@ function draw() {
     section.append(node('p',home.email),createShareCode('帳號 UID',home.uid));
     return;
   }
-  if(view==='history') {historyView(); return;}
+  if(page==='history') {window.courseNav.select('history'); historyView(id); return;}
   if(page==='leaderboard' && (!staff || home.teacher)) {
     window.courseNav.select('leaderboard');
     leaderboardView(staff ? courses.filter(c=>c.owner===home.uid) : courses,id);
     return;
   }
-  if((view==='admin' || view==='legacy') && home.admin) {
-    $('title').textContent=view==='admin'?'授予教師資格':'將未歸屬活動加入課程';
-    adminPanel(view);
+  if(view==='admin' && home.admin) {
+    $('title').textContent='授予教師資格';
+    form(panel(),[['uid','教師的帳號 UID']],'授予教師資格',async data=>{await api('grant',data); await reload('已授予教師資格。');});
     return;
   }
   if(view==='create-course' && home.teacher) {
@@ -135,7 +176,7 @@ function draw() {
   if(!staff && (view==='join' || view==='create-team')) {
     const create=view==='create-team', section=panel();
     $('title').textContent=create?'建立小組':'加入小組';
-    if(!create) section.append(node('p','已加入的小組可在「我的小組」找到。忘記密碼可請授課老師重設。','muted'));
+    if(!create) section.append(node('p','可從「我的課程」查看各課程的小組。忘記密碼可請授課老師重設。','muted'));
     form(section,[['course','老師提供的課程代碼'],['name','小組名稱'],['password',create?'設定小組密碼（至少 8 字元）':'小組密碼','password']],
       create?'建立小組':'加入小組',async data=>{
         await api(create?'create-team':'join-team',data);
@@ -148,20 +189,18 @@ function draw() {
   window.courseNav.select('home');
   const list=panel();
   list.classList.add('course-index');
-  const head=node('div',undefined,'index-heading');
-  head.append(node('h2',staff?'課程清單':'已加入的課程'),node('span',courses.length+' 門','count'));
-  list.append(head);
-  if(!courses.length) list.append(node('p',staff?'目前沒有授課或受邀的課程。':'目前尚未加入課程小組。','muted'));
-  for(const c of courses) listEntry(list,c.title,staff?(c.owner===home.uid?'授課教師':'助教'):c.name,()=>navigate('course/'+c.id));
-  if(!courses.length && (home.teacher || !staff)) {
-    const actions=node('div',undefined,'form-actions');
-    if(home.teacher) button(actions,'新增課程',()=>navigate('create-course'),'primary');
-    if(!staff) {
-      button(actions,'加入小組',()=>navigate('join'),'primary');
-      button(actions,'建立小組',()=>navigate('create-team'));
-    }
-    list.append(actions);
+  const actions=toolbar(list);
+  if(home.teacher) button(actions,'新增課程',()=>navigate('create-course'),'primary');
+  if(!staff) {
+    button(actions,'加入小組',()=>navigate('join'),'primary');
+    button(actions,'建立小組',()=>navigate('create-team'));
   }
+  button(actions,staff?'學生作答與批改':'作答紀錄',()=>navigate('history'));
+  if(!staff || home.teacher) button(actions,'課程排行榜',()=>navigate('leaderboard'));
+  const {track}=gallery(list,staff?'授課與協作':'已加入的課程',courses.length+' 門');
+  if(!courses.length) list.append(node('p',staff?'目前沒有授課或受邀的課程。':'目前尚未加入課程小組。','muted'));
+  for(const c of courses) galleryCard(track,c.title,staff?(c.owner===home.uid?'授課教師':'助教'):c.name,
+    ()=>navigate('course/'+c.id),'course-cover','課程',staff?'':'我的小組 · ');
 }
 function profile() {
   const user=auth.currentUser;
@@ -239,7 +278,7 @@ function leaderboardView(courses,preferred) {
   refresh();
 }
 
-function historyView() {
+function historyView(preferred) {
   const teaching=staff, courses=teaching?home.teaching:home.studying;
   $('title').textContent=teaching?'學生作答與批改':'作答紀錄';
   const section=panel('依課程查看');
@@ -247,6 +286,7 @@ function historyView() {
   const label=node('label','選擇課程'), select=node('select'), rows=node('div');
   label.append(select); section.append(label,rows);
   for(const c of courses) {const o=node('option',c.title+(teaching?'':' · '+c.name)); o.value=c.id; select.append(o);}
+  if(courses.some(c=>c.id===preferred)) select.value=preferred;
   async function load() {
     const version=++pageVersion, course=select.value;
     rows.replaceChildren(node('p','讀取中…','muted'));
@@ -284,38 +324,7 @@ function historyView() {
       }
     } catch(error) {if(version===pageVersion) rows.textContent=error.message;}
   }
-  select.onchange=load; load();
-}
-function adminPanel(view) {
-  const admin = panel();
-  if(view==='admin') {
-    form(admin,[['uid','教師的帳號 UID']],'授予教師資格',async data=>{await api('grant',data); await reload('已授予教師資格。');});
-    return;
-  }
-  if (!home.legacy.length || !home.destinations.length) {
-    admin.append(node('p',home.legacy.length?'目前沒有可選的課程。請先由授課老師建立課程，再加入活動。':'目前沒有未歸屬的活動。','muted'));
-    return;
-  }
-  admin.append(node('p','下列活動尚未加入任何課程。加入後，授課老師可以在該課程的「課程活動」中找到它們。','muted'));
-  const label=node('label','選擇課程');
-  const select=node('select');
-  select.id='activity-destination'; label.htmlFor=select.id;
-  const names=new Set(), duplicateNames=new Set();
-  for(const c of home.destinations) {
-    if(names.has(c.title)) duplicateNames.add(c.title);
-    names.add(c.title);
-  }
-  for(const c of home.destinations) {
-    const label=duplicateNames.has(c.title)?c.title+'（'+c.id+'）':c.title;
-    select.append(new Option(label,c.id));
-  }
-  admin.append(label,select);
-  for (const lesson of home.legacy) button(admin,'將「'+lesson.title+'」加入課程',async()=>{
-    const course=home.destinations[select.selectedIndex];
-    if (!confirm('將「'+lesson.title+'」加入「'+course.title+'」課程？\n授課老師：'+course.email)) return;
-    await api('claim',{aid:lesson.id,course:course.id});
-    await reload('已將「'+lesson.title+'」加入「'+course.title+'」課程。');
-  });
+  select.onchange=()=>navigate('history/'+select.value); load();
 }
 async function enter(id,aid,review=false,replace=false) {
   const version=pageVersion;
@@ -333,6 +342,7 @@ async function leaveTeam(course, membership, version) {
   const user=auth.currentUser;
   await api('leave-team',{course:course.id,enrollment:membership.enrollment});
   if(auth.currentUser!==user || !home) return;
+  classroomDrafts.clearMembership(home.uid,course.id,membership.enrollment);
   home.studying=home.studying.filter(item=>item.id!==course.id);
   if(pageVersion!==version) {draw(); return;}
   history.replaceState(null,'','#join');
@@ -366,23 +376,85 @@ async function course(c,task) {
       });
       return;
   }
-  const details=panel(staff?null:data.membership.name);
-  details.append(createShareCode('課程代碼',c.id));
-  if (!staff) {
-    details.append(node('p','本課程累計　'+data.total+' 分','score-card'));
-    button(details,'退出小組',()=>leaveTeam(c,data.membership,version),'text-button');
+  const details=panel();
+  const actions=toolbar(details);
+  if(data.role==='owner') button(actions,'建立搶答活動',()=>navigate('course/'+c.id+'/new-activity'),'primary');
+  button(actions,staff?'學生作答與批改':'作答紀錄',()=>navigate('history/'+c.id));
+  if(!staff || data.role==='owner') button(actions,'課程排行榜',()=>navigate('leaderboard/'+c.id));
+  const summary=node('div',undefined,'course-summary');
+  const total=node('strong',undefined,'team-total');
+  if(!staff) {
+    const team=node('div',undefined,'team-heading');
+    team.append(node('span','我的小組','team-label'),node('h2',data.membership.name),total);
+    summary.append(team);
   }
-  const list=panel(staff?'課堂活動與學生紀錄':'本組活動與答題紀錄');
-  if (!data.lessons.length) {
-    list.append(node('p','這門課還沒有活動。','muted'));
-    if (data.role==='owner') button(list,'建立課堂活動',()=>navigate('course/'+c.id+'/new-activity'),'primary');
+  summary.append(createShareCode('課程代碼',c.id));
+  if(!staff) button(summary,'退出小組',()=>leaveTeam(c,data.membership,version),'text-button');
+  details.append(summary);
+  const list=panel();
+  const {track:rows,amount,update}=gallery(list,'搶答活動',data.lessons.length+' 場');
+  const updateStatus=node('p',undefined,'field-hint');
+  updateStatus.hidden=true; updateStatus.setAttribute('role','status');
+  list.append(updateStatus);
+  let rendered,reading=false;
+  function showLessons(result) {
+    if(!staff) total.textContent='本課程累計　'+result.total+' 分';
+    const key=JSON.stringify(result.lessons);
+    if(key===rendered) return;
+    rendered=key;
+    const focus=document.activeElement?.dataset.lesson;
+    const offset=rows.scrollLeft;
+    rows.replaceChildren();
+    amount.textContent=result.lessons.length+' 場';
+    if (!result.lessons.length) rows.append(node('p','這門課還沒有搶答活動。','muted'));
+    const lessons=[...result.lessons].sort((a,b)=>Number(b.phase==='active')-Number(a.phase==='active'));
+    for(const lesson of lessons) {
+      const missed=!staff && lesson.phase==='results' && !lesson.attended;
+      const detail=staff?phase[lesson.phase]:missed?'已結束 · 未參與':phase[lesson.phase]+'　'+lesson.score+' 分';
+      const date=new Date(lesson.activity_date*1000).toLocaleDateString('zh-TW');
+      const card=galleryCard(rows,lesson.title,detail,missed?null:()=>enter(c.id,lesson.id),lesson.phase,date);
+      card.dataset.lesson=lesson.id;
+      if(lesson.id===focus) card.focus({preventScroll:true});
+    }
+    rows.scrollLeft=offset;
+    update();
   }
-  for (const l of data.lessons) {
-    const caption=l.title+' · '+phase[l.phase]+(staff?'':' · '+l.score+' 分');
-    if (!staff && l.phase==='results' && !l.attended) list.append(node('p',caption+' · 未參與'));
-    else listEntry(list,l.title,staff ? phase[l.phase] : phase[l.phase]+'　'+l.score+' 分',()=>enter(c.id,l.id),l.phase);
+  async function refreshLessons(manual=false) {
+    if(version!==pageVersion || reading) return;
+    clearTimeout(courseTimer);
+    reading=true;
+    try {
+      if(document.hidden && !manual) return;
+      const result=await api('course',{course:c.id,staff},AbortSignal.timeout(10000));
+      if(version!==pageVersion) return;
+      if(!staff && result.membership.enrollment!==data.membership.enrollment) {
+        classroomDrafts.clearMembership(home.uid,c.id,data.membership.enrollment);
+        await reload();
+        return;
+      }
+      updateStatus.hidden=true;
+      showLessons(result);
+    } catch(error) {
+      if(version!==pageVersion) return;
+      if(error.status===403 && !staff) {
+        classroomDrafts.clearMembership(home.uid,c.id,data.membership.enrollment);
+        try { await reload('小組資格已變更。'); }
+        catch {
+          updateStatus.textContent='小組資格已變更，目前無法取得最新課程資料，稍後會自動重試。';
+          updateStatus.hidden=false;
+        }
+      } else {
+        updateStatus.textContent=manual?error.message:'活動清單暫時無法更新，稍後會自動重試。';
+        updateStatus.hidden=false;
+      }
+    } finally {
+      reading=false;
+      if(!staff && version===pageVersion) courseTimer=setTimeout(refreshLessons,5000);
+    }
   }
-  button(list,'更新活動清單',()=>course(c),'text-button');
+  showLessons(data);
+  button(list,'更新活動清單',()=>refreshLessons(true),'text-button');
+  if(!staff) courseTimer=setTimeout(refreshLessons,5000);
 }
 for (const id of ['staff','student']) $(id).onclick=()=>{
   if(auth?.currentUser) return;
@@ -407,6 +479,7 @@ async function init() {
     await sdk.signInWithPopup(auth,provider);
   });
   sdk.onAuthStateChanged(auth,async user=>{
+    if(!user) classroomDrafts.clear();
     authReady=true;
     home=null; draw();
     entryStatus(user?'正在載入你的課程…':'');
@@ -427,7 +500,8 @@ async function leaveRoom() {
   const prior=JSON.parse(sessionStorage.getItem('classroom.auth') || 'null');
   if (prior?.course) {
     await fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+prior.token,'Content-Type':'application/json'},body:'{}'});
-    for (const key of Object.keys(sessionStorage)) if (key.startsWith('classroom.')) sessionStorage.removeItem(key);
+    sessionStorage.removeItem('classroom.auth');
+    sessionStorage.removeItem('classroom.activity');
   }
 }
 leaveRoom().then(init).catch(()=>entryStatus('暫時無法連上登入服務，請重新載入。',true));

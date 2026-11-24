@@ -30,6 +30,11 @@ async (page) => {
     check(await page.evaluate(()=>current.phase==='preparing'),'missing key started'); await first.locator('.choice-correct').selectOption('0');
     await tab('settings'); check(await page.locator('#quiz-mode').inputValue()==='sequential','unsaved mode lost'); await tab('questions');
     check(await first.locator('.choice-correct').inputValue()==='0','tab switch lost answer key');
+    await page.reload();
+    await page.locator('#settings-form').waitFor();
+    check(await page.locator('#quiz-mode').inputValue()==='sequential','reload lost unsaved mode');
+    await tab('questions');
+    check(await first.locator('.choice-correct').inputValue()==='0' && (await first.locator('.choice-options').inputValue()).includes('只有陽光'),'reload lost unsaved choice draft');
     const second=page.locator('.question-config-unit').nth(1); await second.locator('summary').click(); await second.locator('.betting-enabled').uncheck();
     await page.waitForFunction(()=>document.querySelectorAll('.question-config-unit[open]').length===1);
     await page.route('**/api/activities/*/question-settings',route=>route.fulfill({status:500,contentType:'application/json',body:JSON.stringify({error:'模擬儲存失敗'})}));
@@ -47,16 +52,35 @@ async (page) => {
     await student.waitForFunction(()=>current.own_score.awaiting_close_units===1); await page.waitForFunction(()=>current.answers.length===1);
     check(await student.evaluate(()=>current.own_score.total===0),'score published before close');
     check(await page.locator('#teacher-monitor').isVisible(),'active default not monitor');
+    const stamp=student.locator('.answer-field[data-question="1"] .student-stamp');
+    check(await stamp.isHidden(),'未關題提前顯示正解章');
+    await student.evaluate(()=>{
+      window.stampCount=0;
+      const native=Element.prototype.animate;
+      Element.prototype.animate=function(...args) {
+        if(this.classList.contains('student-stamp')) window.stampCount++;
+        return native.apply(this,args);
+      };
+    });
     await page.locator('#close-round').click(); await student.waitForFunction(()=>current.own_score.total===6); await page.locator('#next-round').click(); await student.waitForFunction(()=>!document.querySelector('#answer-1').disabled);
+    await stamp.waitFor();
+    await student.evaluate(async()=>{await refresh();await refresh();});
+    check(await student.evaluate(()=>window.stampCount===1),'已公布的章未播放一次');
+    await student.emulateMedia({reducedMotion:'reduce'});
     await student.locator('#answer-1').fill('植物利用光能進行光合作用。'+ 'LongAnswer'.repeat(70)); await student.locator('.question-card').nth(1).locator('button').click();
     await page.waitForFunction(()=>current.answers.length===2); await page.locator('#close-round').click();
     check(await page.locator('#monitor-question').inputValue()==='2','sequential monitor not following');
     await capture('monitor-mobile'); await page.setViewportSize({width:1280,height:900}); await capture('monitor-desktop');
+    const left=await page.locator('#review-guide').boundingBox(), right=await page.locator('#teacher-monitor').boundingBox();
+    check(left.x+left.width<=right.x,'桌面批改未分欄');
     await page.locator('#monitor-question').selectOption('1'); await tab('tools'); await tab('monitor');
     check(await page.locator('#monitor-question').inputValue()==='1','filter lost across tabs');
     await page.locator('#monitor-question').selectOption('2'); await page.getByRole('button',{name:'第一組_ABCDEFGHIJKLMNOPQRSTUVWXYZ 第 2 題判為正確',exact:true}).click();
     await student.waitForFunction(()=>current.own_score.pending_units===0); check(await student.evaluate(()=>current.own_score.total===10),'Missing unbet speed bonus');
+    await student.locator('.answer-field[data-question="2"] .student-stamp').waitFor();
+    check(await student.evaluate(()=>window.stampCount===1),'減少動態仍蓋章播放');
     await page.locator('#end').click(); await page.locator('#confirm-end').click(); await page.locator('#results').waitFor({state:'visible'});
+    await student.locator('#group-report').screenshot({path:'output/playwright/student-stamp-report.png'});
     await page.locator('#results .full-answer summary').click(); check((await page.locator('#results .full-answer p').innerText()).includes('LongAnswer'.repeat(70)),'full answer lost');
     await page.locator('#results .full-answer summary').click(); await capture('results-desktop');
     check(await page.locator('#teacher-monitor').isHidden(),'results stacked with monitor');

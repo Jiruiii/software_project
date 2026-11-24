@@ -316,17 +316,27 @@ class ExtraFeatures:
         if answer not in options: raise QuizError(400, '請選擇題目提供的有效選項。')
         return answer, 'correct' if answer == options[config['correct_index']] else 'incorrect'
 
+    def _complete_submissions_by_unit(self, aid):
+        """Group complete submissions by unit, preserving server receipt order."""
+        units = self._units(aid)
+        unit_for = {q: unit for unit, questions in units.items() for q in questions}
+        submissions = {unit: {} for unit in units}
+        rows = self.db.execute("""SELECT a.*, g.name AS group_name FROM answers a
+            JOIN groups g ON g.id=a.group_id WHERE a.activity_id=? ORDER BY a.id""", (aid,))
+        for row in rows:
+            groups = submissions[unit_for[row['question_id']]]
+            groups.setdefault(row['group_id'], []).append(dict(row))
+        for unit, questions in units.items():
+            complete = [answers for answers in submissions[unit].values() if len(answers) == len(questions)]
+            if complete:
+                yield questions, complete
+
     def _winner_rows(self, aid):
         """Earliest complete unit not disqualified; one group wins every child."""
-        rows = [dict(r) for r in self.db.execute("SELECT a.*,g.name AS group_name FROM answers a JOIN groups g ON g.id=a.group_id WHERE a.activity_id=? ORDER BY a.id", (aid,))]
         winners = {}
-        for questions in self._units(aid).values():
-            candidates = {}
-            for row in rows:
-                if row["question_id"] in questions:
-                    candidates.setdefault(row["group_id"], []).append(row)
-            for answers in candidates.values():
-                if len(answers) == len(questions) and all(a["verdict"] != "incorrect" for a in answers):
+        for _, submissions in self._complete_submissions_by_unit(aid):
+            for answers in submissions:
+                if all(a["verdict"] != "incorrect" for a in answers):
                     winners.update({a["question_id"]: a for a in answers})
                     break
         return winners
@@ -383,7 +393,15 @@ class ExtraFeatures:
 
     def _sheet_answers(self, activity):
         aid = activity['id']
-        answers = {q:f"{a['text']}（{a['group_name']}）" for q,a in self._winner_rows(aid).items() if self._reviewable(activity,q)}
+        answers = {}
+        for questions, submissions in self._complete_submissions_by_unit(aid):
+            if not self._reviewable(activity, questions[0]):
+                continue
+            for submission in submissions:
+                for row in submission:
+                    q = row['question_id']
+                    if q not in answers and row['verdict'] != 'incorrect':
+                        answers[q] = f"{row['text']}（{row['group_name']}）"
         for row in self.db.execute('SELECT question_id,reference_answer FROM question_meta WHERE activity_id=? AND reference_override=1', (aid,)):
             if row['reference_answer'] and self._reviewable(activity,row['question_id']):
                 answers[row['question_id']] = f"{row['reference_answer']}（老師答案）"

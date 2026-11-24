@@ -32,7 +32,8 @@ class FakeGoogle:
         if not self.ignore:
             for req in body["requests"]:
                 update=req["updateCells"]; start=update["start"]
-                cells=self.data["sheets"][0]["data"][0]["rowData"][start["rowIndex"]]["values"]
+                sheet=next(s for s in self.data["sheets"] if s["properties"]["sheetId"]==start["sheetId"])
+                cells=sheet["data"][0]["rowData"][start["rowIndex"]]["values"]
                 while len(cells) <= start["columnIndex"]:
                     cells.append({})
                 cell=cells[start["columnIndex"]]
@@ -94,7 +95,7 @@ class SheetsWorkflowTests(unittest.TestCase):
         answer = self.service.snapshot(self.teacher,aid)['answers'][0]
         self.service.review(self.teacher,aid,answer['id'],'incorrect')
         self.flow.export(self.teacher,aid)
-        self.assertEqual(grid.cells, from_google(self.google.data)[0].cells)
+        self.assertEqual({**grid.cells, (5,7):'second（group）'}, from_google(self.google.data)[0].cells)
 
     def test_legacy_group_export_stops_before_recovering_or_writing_labels(self):
         grid = from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]

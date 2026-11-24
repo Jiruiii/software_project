@@ -41,6 +41,8 @@ async (page) => {
     const leaders=a.locator('#live-ranking-rows li');
     await a.locator('#live-ranking').waitFor();
     await page.locator('#live-ranking').waitFor();
+    check(!await page.locator('#live-ranking').evaluate(card=>card.open),'Teacher ranking should start collapsed');
+    await page.locator('#live-ranking summary').click();
     check(await page.locator('#activity-chat').isHidden(),'Teacher has student chat');
     check(await leaders.count()===2 && await leaders.first().innerText().then(t=>t.includes('0 分')),'Initial activity ranking incorrect');
     const prompt=a.locator('.answer-field[data-question="1"] .question-prompt');

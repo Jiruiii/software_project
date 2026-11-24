@@ -22,7 +22,7 @@ async (page) => {
   await post(path+'/answers',{question:'1',answer:'第二快答案',stake:2},b);
   const synced=async previous=>page.waitForFunction(previous=>current.source.sync.state==='synced' && current.source.exported_at>previous,previous);
   await page.locator('#close-round').click(); await synced(0);
-  check(await page.locator('#sheet-export-controls').isVisible(),'Sync panel hidden during active activity');
+  check(await page.locator('#review-guide #sheet-export-controls').isVisible(),'批改左欄缺少學習單');
   await page.locator('#sheet-sync-status[data-state="synced"]').waitFor();
   check(await page.locator('#monitor-table [data-verdict="pending"]').count()===0,'Pending action present');
   check(!(await page.locator('#activity').innerText()).includes('未判定'),'Teacher still shows old pending wording');
@@ -46,6 +46,40 @@ async (page) => {
   await page.setViewportSize({width:390,height:844});
   await page.screenshot({path:'output/playwright/auto-sync-mobile.png',fullPage:true});
   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
+  await page.locator('#back').click();
+  await page.locator('#source-sheets').click();
+  await page.locator('#sheet-url').fill('https://docs.google.com/spreadsheets/d/test-copy-spreadsheet-id-123/edit');
+  await page.locator('#sheet-preview-form button').click();
+  const worksheets=page.getByLabel('選擇工作表');
+  await worksheets.waitFor();
+  let release, started;
+  const waitForFirst=new Promise(resolve=>{started=resolve;});
+  const delayFirst=new Promise(resolve=>{release=resolve;});
+  await page.route('**/api/sheets/preview',async route=>{
+    const response=await route.fetch();
+    started();
+    await delayFirst;
+    await route.fulfill({response});
+  },{times:1});
+  await worksheets.selectOption({label:'學習單'});
+  await waitForFirst;
+  const firstFinished=page.waitForEvent('requestfinished',{predicate:req=>req.url().endsWith('/api/sheets/preview') && req.postDataJSON()?.worksheet==='學習單'});
+  try {
+    await worksheets.selectOption({label:'第二張學習單'});
+    await page.locator('#sheet-preview-title').filter({hasText:'第二張學習單'}).waitFor();
+  } finally {release();}
+  await firstFinished;
+  await page.waitForFunction(()=>document.querySelector('#sheet-preview-title').textContent.startsWith('第二張學習單'));
+  await page.locator('#sheet-import').click();
+  await page.waitForFunction(()=>current?.source?.sheet_title==='第二張學習單');
+  const imported=await page.evaluate(()=>({id:current.id,code:current.code}));
+  const member=await post('/api/join',{code:imported.code,group:'分頁組'});
+  await page.locator('#start').click();
+  await page.waitForFunction(()=>current.phase==='active');
+  await post('/api/activities/'+imported.id+'/answers',{question:'1',answer:'第二張答案'},member.token);
+  await page.locator('#end').click();
+  await page.locator('#confirm-end').click();
+  await synced(0);
   check(!errors.length,errors.join('\n'));
-  return {passed:true,checks:['two-verdict-controls','round-close-sync','fallback-second','all-wrong-restore','correct-restores-first','choice-skips-wrong','active-sync-panel','mobile-layout'],pageErrors:errors};
+  return {passed:true,checks:['two-verdict-controls','round-close-sync','fallback-second','all-wrong-restore','correct-restores-first','choice-skips-wrong','active-sync-panel','mobile-layout','out-of-order-worksheet-preview'],pageErrors:errors};
 }

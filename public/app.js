@@ -5,7 +5,9 @@ const verdictNames = {pending:"待批改", withheld:"等待本題結束", correc
 let auth = null, activityId = null, current = null, generation = 0;
 let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", lastResults = "", lastList = "";
 const pendingAnswers = new Set();
-let sheetPreview = null, lastGoogleCheck = 0;
+const unconfirmedAnswers = new Map();
+let snapshotSequence=0;
+let sheetPreview = null, previewRequest = 0, lastGoogleCheck = 0;
 let teacherView = 'settings', teacherViewKey = '', savingSettings = false, monitorKey = '', monitorFollow = true;
 let clusterBusy = false, clusterUndo = null, clusterRequest = 0;
 try { auth = JSON.parse(sessionStorage.getItem("classroom.auth")); activityId = sessionStorage.getItem("classroom.activity"); } catch { sessionStorage.clear(); }
@@ -55,7 +57,9 @@ async function api(path, data, token = auth?.token) {
     response = await fetch(path, {method: data === undefined ? "GET" : "POST", headers,
       body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.timeout(path.startsWith("/api/sheets/") || path.endsWith("/export") ? 45000 : 5000)});
   } catch { throw Object.assign(new Error("暫時無法連線，請確認服務仍在執行。"), {network: true}); }
-  const payload = await response.json();
+  let payload;
+  try {payload=await response.json();}
+  catch {throw Object.assign(new Error('未收到完整回應，請稍後再試。'),{network:true});}
   if (!response.ok) throw Object.assign(new Error(payload.error || "操作失敗。"), {status: response.status});
   return payload;
 }
@@ -81,7 +85,11 @@ function saveAuth(value) {
   classroomMotion.reset();
   resetClusterReview();
   resetReplay();
-  for (const key of Object.keys(sessionStorage)) if (key.startsWith('classroom.draft.')) sessionStorage.removeItem(key);
+  classroomDrafts.clear();
+  unconfirmedAnswers.clear();
+  delete $('settings-form').dataset.activity;
+  delete $('question-settings').dataset.activity;
+  referenceDrafts.clear();
   generation++;
   auth = value; activityId = value?.activity_id || null; current = null;
   cardsKey = lastMonitor = lastResults = lastList = "";
@@ -94,6 +102,9 @@ function saveAuth(value) {
   showView(); connection(true);
 }
 function selectActivity(id) {
+  unconfirmedAnswers.clear();
+  delete $('settings-form').dataset.activity;
+  delete $('question-settings').dataset.activity;
   classroomMotion.reset();
   resetClusterReview();
   resetReplay();
@@ -143,7 +154,6 @@ async function googleStatus() {
   if (status.server_managed) {
     $("google-status").textContent = "在試算表的「共用」中，將「一般存取權」設為「知道連結的任何人」及「編輯者」，再貼上副本網址。匯入後會連結到目前課程。";
     $("google-connect").hidden = $("google-disconnect").hidden = $("google-auth-link").hidden = true;
-    document.querySelector('a[href="/google-setup.html"]').hidden = true;
     return;
   }
   $("google-status").textContent = status.connected ? "Google 已連線" : status.configured ? "設定已就緒，請連線 Google" : "尚未設定 Google，公開學習單仍可預覽與匯入";
@@ -160,35 +170,57 @@ $("google-disconnect").onclick = () => action($("google-disconnect"), async () =
   await api("/api/google/disconnect", {}); $("google-auth-link").hidden = true; await googleStatus();
 });
 $("sheet-url").oninput = () => {
+  ++previewRequest;
+  $('sheet-preview-form').querySelector('button').disabled=false;
   sheetPreview = null; $("sheet-preview").hidden = $("worksheet-field").hidden = true;
 };
-$("sheet-worksheet").onchange = () => {sheetPreview = null; $("sheet-preview").hidden = true;};
+$("sheet-worksheet").onchange = previewSheet;
 $("sheet-preview-form").onsubmit = (event) => {
-  event.preventDefault(); action(event.submitter, async () => {
+  event.preventDefault(); previewSheet();
+};
+async function previewSheet() {
+  const request=++previewRequest, ownGeneration=generation;
+  const url=$('sheet-url').value;
+  const worksheet=$('worksheet-field').hidden ? undefined : $('sheet-worksheet').value;
+  if(worksheet==='') { $('sheet-worksheet').focus(); return; }
+  const button=$('sheet-preview-form').querySelector('button');
+  button.disabled=true;
+  notice('');
+  try {
     sheetPreview = null; $("sheet-preview").hidden = true;
-    const ownGeneration = generation, url = $("sheet-url").value;
-    const worksheet = $("worksheet-field").hidden ? undefined : $("sheet-worksheet").value;
     const result = await api("/api/sheets/preview", {url, worksheet});
-    if (ownGeneration !== generation || url !== $("sheet-url").value) return;
+    if (ownGeneration !== generation || request!==previewRequest) return;
     if (result.needs_selection) {
-      $("sheet-worksheet").replaceChildren(...result.worksheets.map(title => {const option = el("option", title); option.value = title; return option;}));
-      $("worksheet-field").hidden = false; notice("請選擇工作表，再按一次讀取預覽。", true); return;
+      const placeholder=new Option('請選擇工作表',''); placeholder.disabled=true;
+      $("sheet-worksheet").replaceChildren(placeholder,...result.worksheets.map(title=>new Option(title,title)));
+      $("sheet-worksheet").value='';
+      $("worksheet-field").hidden = false; $("sheet-worksheet").focus(); return;
     }
-    sheetPreview = result;
+    sheetPreview = {...result,url,worksheet};
     $("sheet-preview-title").textContent = `${result.sheet_title} · 共 ${result.count} 題`;
-    $("sheet-preview-warning").textContent = result.official_template ? "這是官方原始範本，可用於試讀。若要寫回答案，請先建立自己的副本並重新匯入。" : "請核對題號及答案格。確認後會重新檢查來源，再建立活動。";
+    $("sheet-preview-warning").textContent = result.official_template ? "這是官方原始範本，可用於試讀。若要寫回答案，請先建立自己的副本並重新匯入。" : "請核對題號及答案格。確認後會重新檢查來源，再建立搶答活動。";
     const table = el("table"), head = el("tr"), body = el("tbody"), thead = el("thead");
     head.append(el("th", "題號"), el("th", "題組"), el("th", "答案儲存格")); thead.append(head);
     for (const target of result.targets) {const row = el("tr"); row.append(el("td", target.question), el("td", target.unit), el("td", target.cell)); body.append(row);}
     table.append(thead, body); $("sheet-preview-table").replaceChildren(table);
     $("sheet-activity-title").value = result.sheet_title + "・課堂搶答";
     $("sheet-preview").hidden = false;
-  });
-};
+  } catch(error) {
+    if(request===previewRequest && ownGeneration===generation) notice(error.message);
+  } finally {
+    if(request===previewRequest) button.disabled=false;
+  }
+}
 $("sheet-import").onclick = () => action($("sheet-import"), async () => {
-  if (!sheetPreview) throw new Error("請先讀取預覽。");
+  const worksheet=$('worksheet-field').hidden ? undefined : $('sheet-worksheet').value;
+  if (!sheetPreview || sheetPreview.url!==$('sheet-url').value || sheetPreview.worksheet!==worksheet)
+    throw new Error("請先讀取目前工作表的預覽。");
   const ownGeneration = generation;
-  const result = await api("/api/sheets/import", {preview_id: sheetPreview.preview_id, title: $("sheet-activity-title").value});
+  const controls=[$('sheet-url'),$('sheet-worksheet'),$('sheet-preview-form').querySelector('button'),$('source-manual'),$('sheet-activity-title')];
+  controls.forEach(control=>control.disabled=true);
+  let result;
+  try { result = await api("/api/sheets/import", {preview_id: sheetPreview.preview_id, title: $("sheet-activity-title").value}); }
+  finally { controls.forEach(control=>control.disabled=false); }
   if (ownGeneration !== generation) return;
   sheetPreview = null; $("sheet-preview").hidden = true; selectActivity(result.id); await refresh();
 });
@@ -212,7 +244,7 @@ $('end').onclick = async () => {
   dialog.querySelector('[value="cancel"]').focus();
   if (await choice !== 'end' || activityId !== id || current?.phase !== 'active') return;
   window.courseNav.revealActivity();
-  await action($('end'),async () => {await api(`/api/activities/${id}/end`, {}); await refresh();});
+  await action($('end'),async () => {await api(`/api/activities/${id}/end`, {}); await refresh(); if(current?.phase==='results') $('content-title').focus();});
 };
 
 function timeText(seconds) { return new Date(seconds * 1000).toLocaleTimeString("zh-TW", {hour12:false}); }
@@ -283,23 +315,40 @@ function renderCards(state) {
       const saved=el('p',undefined,'saved-answer'), time=el('p',undefined,'answer-time'); saved.hidden=time.hidden=true;
       const reference=el('aside',undefined,'published-reference'); reference.hidden=true;
       reference.append(el('strong','老師正確答案'),el('p',undefined,'reference-text'));
-      field.append(label,input,saved,time,reference); card.append(field);
+      const stamp=el('strong','正解','verdict-stamp student-stamp'); stamp.hidden=true;
+      field.append(label,input,saved,stamp,time,reference); card.append(field);
     }
     const betting=state.question_settings[unit.questions[0]].betting_enabled;
     const label=el('label',betting?`信心下注（可不押${unit.questions.length>1?'，整題組計一次分':''}）`:'本題未開放下注'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
     for (const v of betting?[0,1,2,3]:[0]) {const option=el('option',v===0?'不押（0 分）':`${v} 分`); option.value=v; stake.append(option);}
     card.dataset.betting=String(betting);
     const button=el('button',unit.questions.length>1?'一次送出整個題組':'送出本組答案','primary wide'); button.type='submit';
-    card.append(label,stake,button);
-    const draftKey=`classroom.draft.${auth.token}.${state.id}.${unit.id}`; card.dataset.draftKey=draftKey;
-    try {const draft=JSON.parse(sessionStorage.getItem(draftKey)); if (draft) {for (const q of unit.questions) {
+    card.append(label,stake);
+    const wagerHint=el('p',undefined,'field-hint wager-hint');
+    function updateWagerHint() {
+      wagerHint.textContent=stake.value==='0'?'不押分。':`整組全對 +${stake.value} 分；任一小題錯 −${stake.value} 分，只扣一次。`;
+    }
+    if(betting && unit.questions.length>1) {
+      wagerHint.id=`wager-hint-${i}`; stake.setAttribute('aria-describedby',wagerHint.id);
+      card.append(wagerHint);
+    }
+    card.append(button);
+    const draftKey=classroomDrafts.key(auth,state.id,'answer',unit.id); card.dataset.draftKey=draftKey;
+    const oldKey=`classroom.draft.${auth.token}.${state.id}.${unit.id}`;
+    try {const draft=classroomDrafts.read(draftKey) || classroomDrafts.read(oldKey); if (draft) {for (const q of unit.questions) {
       const value=draft.answers?.[q] ?? draft.answer ?? '';
       if(inputs[q].tagName==='FIELDSET') for(const box of inputs[q].querySelectorAll('input')) box.checked=Array.isArray(value)&&value.includes(box.value);
       else inputs[q].value=typeof value==='string'?value:'';
-    } stake.value=String(betting?(draft.stake ?? 0):0);}} catch {sessionStorage.removeItem(draftKey);}
+    } stake.value=String(betting?(draft.stake ?? 0):0);
+      if(sessionStorage.getItem(oldKey)!==null) {
+        sessionStorage.setItem(draftKey,JSON.stringify(draft)); sessionStorage.removeItem(oldKey);
+      }
+    }} catch {notice('無法還原草稿。');}
+    updateWagerHint();
     const readAnswers=()=>Object.fromEntries(unit.questions.map(q=>[q,answerValue(inputs[q])]));
     const saveDraft=()=>{try {sessionStorage.setItem(draftKey,JSON.stringify({answers:readAnswers(),stake:Number(stake.value)}));} catch {notice('瀏覽器無法保存草稿，重新整理前請先複製答案。');}};
-    for (const input of Object.values(inputs)) {input.oninput=saveDraft; input.onchange=saveDraft;} stake.onchange=saveDraft;
+    for (const input of Object.values(inputs)) {input.oninput=saveDraft; input.onchange=saveDraft;}
+    stake.onchange=()=>{updateWagerHint(); saveDraft();};
     card.onsubmit=event=>{
       event.preventDefault(); const requestActivity=activityId;
       const answers=readAnswers();
@@ -311,6 +360,13 @@ function renderCards(state) {
           const data=grouped?{unit:unit.id,answers,stake:Number(stake.value)}:
             {question:unit.questions[0],answer:answers[unit.questions[0]],stake:Number(stake.value)};
           await api(`/api/activities/${requestActivity}/${grouped?'bundle':'answers'}`,data); notice(`第 ${unit.id} 題已送出。`,true);
+        } catch(error) {
+          if(!error.network) throw error;
+          if(activityId===requestActivity) {
+            unconfirmedAnswers.set(unit.id,snapshotSequence);
+            connection(false);
+            notice(`正在確認第 ${unit.id} 題是否已收到。`);
+          }
         } finally {pendingAnswers.delete(unit.id); await refresh();}
       });
     };
@@ -326,7 +382,7 @@ function updateInputs() {
   const answers=new Map(current.answers.map(a=>[a.question_id,a]));
   for (const card of $('student-questions').children) {
     const fields=[...card.querySelectorAll('.answer-field')], sent=fields.every(f=>answers.has(f.dataset.question));
-    const disabled=sent || !connected || current.phase!=='active' || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.unit);
+    const disabled=sent || !connected || current.phase!=='active' || !current.available_questions.includes(card.dataset.question) || pendingAnswers.has(card.dataset.unit) || unconfirmedAnswers.has(card.dataset.unit);
     const button=card.querySelector('button'), stake=card.querySelector('.stake'); button.disabled=stake.disabled=disabled; button.hidden=sent;
     if (card.dataset.betting==='false') stake.disabled=true;
     const unitIndex=current.units.findIndex(u=>u.id===card.dataset.unit);
@@ -342,6 +398,7 @@ function updateInputs() {
       const answer=answers.get(field.dataset.question), input=field.querySelector('.answer-input'); input.disabled=disabled; input.hidden=!!answer;
       const saved=field.querySelector('.saved-answer'), time=field.querySelector('.answer-time'); saved.hidden=time.hidden=!answer;
       if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · ${answerElapsedText(answer)} · ${verdictNames[answer.verdict]} · ${answer.stake===0?'不押':`下注 ${answer.stake} 分`}`;}
+      field.querySelector('.student-stamp').hidden=answer?.verdict!=='correct';
       if(answer?.points) time.textContent+=' · '+scoreParts(answer.points);
       const reference=field.querySelector('.published-reference'), text=current.references?.[field.dataset.question] || '';
       reference.hidden=!text; reference.querySelector('.reference-text').textContent=text;
@@ -353,12 +410,20 @@ function renderMonitor(state) {
   const key = JSON.stringify([state.groups, state.answers, questions, state.reviewable_questions]);
   if (lastMonitor === key) return; lastMonitor = key;
   $("monitor-summary").textContent = `${state.groups.length} 個小組已加入 · ${state.questions.length} 題 · 已收到 ${state.answers.length} 份答案`;
-  const wrap = $("monitor-table"); wrap.replaceChildren();
-  if (!state.groups.length) {wrap.append(el("p", auth?.course ? "還沒有小組進入活動。學生可從課程首頁進入。" : "還沒有小組加入。將上方活動代碼提供給同學即可加入。", "empty")); return;}
-  const table = el("table"), thead = el("thead"), head = el("tr");
+  const wrap = $("monitor-table");
+  if (!state.groups.length) {wrap.replaceChildren(el("p", auth?.course ? "還沒有小組進入活動。學生可從課程首頁進入。" : "還沒有小組加入。將上方活動代碼提供給同學即可加入。", "empty")); return;}
   const singleQuestion = questions.length === 1;
-  head.append(el("th", singleQuestion ? "小組（先交卷在上）" : "小組")); for (const q of questions) head.append(el("th", `第 ${q} 題`)); thead.append(head);
-  const body = el("tbody");
+  const layout=JSON.stringify([state.id,questions]);
+  let table=wrap.querySelector('table');
+  if(!table || table.dataset.layout!==layout) {
+    table=el('table'); table.dataset.layout=layout;
+    const head=table.createTHead().insertRow();
+    head.append(el("th", singleQuestion ? "小組（先交卷在上）" : "小組"));
+    for (const q of questions) head.append(el("th", `第 ${q} 題`));
+    table.createTBody(); wrap.replaceChildren(table);
+  }
+  const body=table.tBodies[0];
+  const rows=new Map([...body.rows].map(row=>[row.dataset.group,row]));
   const lookup = new Map(state.answers.map(a => [JSON.stringify([a.group_id,a.question_id]), a]));
   let groups = state.groups;
   if (singleQuestion) {
@@ -366,10 +431,27 @@ function renderMonitor(state) {
     const receiptOrder = group => receipts.get(group.id) ?? Number.MAX_SAFE_INTEGER;
     groups = [...groups].sort((a, b) => receiptOrder(a) - receiptOrder(b));
   }
-  for (const group of groups) {
-    const row = el("tr"); row.append(el("th", group.name));
-    for (const q of questions) {
-      const cell = el("td"), answer = lookup.get(JSON.stringify([group.id,q]));
+  const focused=document.activeElement;
+  for (const [i,group] of groups.entries()) {
+    let row=rows.get(group.id);
+    if(!row) {
+      row=el('tr'); row.dataset.group=group.id;
+      const label=el('th',group.name); label.scope='row'; row.append(label);
+      for(const q of questions) row.insertCell();
+    }
+    rows.delete(group.id);
+    if(body.rows[i]!==row) body.insertBefore(row,body.rows[i] || null);
+    for (const [j,q] of questions.entries()) {
+      const cell=row.cells[j+1], answer = lookup.get(JSON.stringify([group.id,q]));
+      const reviewable=state.reviewable_questions.includes(q);
+      const value=JSON.stringify([answer,reviewable]);
+      if(cell.monitorValue===value) continue;
+      const open=!!cell.querySelector('details[open]');
+      const active=cell.contains(focused) ? focused : null;
+      const focusSelector=active?.dataset.verdict ? `[data-verdict="${active.dataset.verdict}"]:enabled` :
+        active?.matches('summary,.cell-answer,.review-revert') ? (active.tagName==='SUMMARY'?'summary':'.'+active.classList[0]) : null;
+      const answerScroll=cell.querySelector('.cell-answer')?.scrollTop;
+      cell.monitorValue=value; cell.replaceChildren(); delete cell.dataset.answerId;
       if (answer) {
         cell.dataset.answerId=answer.id;
         const content=el('span',answer.text,'cell-answer');
@@ -383,11 +465,11 @@ function renderMonitor(state) {
         if(answer.points) cell.append(el('small',scoreParts(answer.points)));
         if(answer.author) cell.append(el('small','送出者　'+answer.author));
         if(answer.reviews?.length) {
-          const history=el('details'); history.append(el('summary','批改紀錄（'+answer.reviews.length+'）'));
+          const history=el('details'); history.open=open; history.append(el('summary','批改紀錄（'+answer.reviews.length+'）'));
           for(const r of answer.reviews) history.append(el('small',new Date(r.stamp*1000).toLocaleString()+' · '+r.email+' · '+verdictNames[r.verdict]));
           cell.append(history);
         }
-        if (state.reviewable_questions.includes(q)) {
+        if (reviewable) {
           const controls = el("div", undefined, "review-controls");
           for (const verdict of ['correct','incorrect']) {
             const button = el('button', verdictNames[verdict], 'text-button'); button.dataset.verdict = verdict;
@@ -396,16 +478,18 @@ function renderMonitor(state) {
             button.onclick = event => action(button,()=>classroomMotion.review(state.id,answer,verdict,event.detail===0));
             controls.append(button);
           }
-          cell.append(controls);
+          content.after(controls);
           classroomMotion.mountReview(cell,answer);
         }
+        if(answerScroll) content.scrollTop=answerScroll;
+        if(focusSelector) cell.querySelector(focusSelector)?.focus({preventScroll:true});
       }
       else cell.append(el("span", "尚未送出", "unsent"));
-      row.append(cell);
     }
-    body.append(row);
   }
-  table.append(thead, body); wrap.append(table);
+  for(const row of rows.values()) row.remove();
+  if(focused!==document.body && focused.isConnected && document.activeElement===document.body && !focused.disabled)
+    focused.focus({preventScroll:true});
 }
 function renderResults(state) {
   const selected=state.role==='teacher'?$('monitor-question').value:'';
@@ -473,6 +557,10 @@ function renderLiveRanking(state) {
   const card=$('live-ranking'), rows=state.top_five;
   card.hidden=!rows;
   if(!rows) return;
+  if(card.dataset.activity!==state.id) {
+    card.dataset.activity=state.id;
+    card.open=state.role!=='teacher';
+  }
   const list=$('live-ranking-rows');
   const key=JSON.stringify([state.id,rows,state.settings.mode,state.group_name]);
   if(list.dataset.values===key) return;
@@ -487,7 +575,7 @@ function renderLiveRanking(state) {
     return item;
   }));
 }
-function renderState(state) {
+function renderState(state,sequence) {
   const previous = current;
   current = state;
   activityChat.sync(state);
@@ -495,6 +583,9 @@ function renderState(state) {
   renderReplay(state);
   showView();
   const teacher = state.role === "teacher", ended = state.phase === "results";
+  if(teacher && state.phase!=='preparing' && (previous?.id!==state.id || previous.phase==='preparing')) {
+    classroomDrafts.clear(classroomDrafts.key(auth,state.id,'setup'));
+  }
   const provisional=ended && !state.grading.complete;
   $('grading-status').hidden=!ended;
   if(ended) {
@@ -556,9 +647,9 @@ function renderState(state) {
   }
   $("session-subtitle").textContent = teacher ? `${state.questions.length} 道題目 · ${state.groups.length} 個小組已加入` : `${state.questions.length} 道題目`;
   $("role-badge").textContent = teacher ? (auth?.assistant?"助教":"教師") : state.group_name;
-  $("teacher-controls").hidden = !teacher || ended || auth?.assistant;
+  $("teacher-controls").hidden = !teacher || state.phase!=="preparing" || !!auth?.assistant;
   $("start").hidden = state.phase !== "preparing";
-  $("end").hidden = state.phase !== "active";
+  $("end").hidden = !teacher || !!auth?.assistant || state.phase !== "active";
   $("phase-label").textContent = phaseNames[state.phase]; $("phase-label").className = "phase-pill " + state.phase;
   if(ended) $('phase-label').textContent='作答結束';
   else if(state.phase==='active' && state.settings.mode==='sequential') {
@@ -577,7 +668,8 @@ function renderState(state) {
   $("results").hidden = !ended;
   $("download-csv").hidden = !teacher || !ended;
   $("settings-form").hidden = !teacher || state.phase !== "preparing";
-  if ($("settings-form").dataset.activity !== state.id) {
+  const enteringSetup=$("settings-form").dataset.activity !== state.id;
+  if (enteringSetup) {
     $("settings-form").dataset.activity = state.id;
     $('settings-form').dataset.dirty='false';
     $("quiz-mode").value = state.settings.mode; $("quiz-fairness").checked = !!state.settings.fairness;
@@ -600,11 +692,24 @@ function renderState(state) {
     select.value = selected || '';
     if (!editing) $('use-priority-source').checked = !!selected;
   }
+  if(enteringSetup && teacher && !auth.assistant && state.phase==='preparing') {
+    const draft=classroomDrafts.read(classroomDrafts.key(auth,state.id,'setup','rules'));
+    if(draft) {
+      $('quiz-mode').value=draft.mode;
+      $('quiz-fairness').checked=draft.fairness;
+      $('quiz-duration').value=draft.duration;
+      $('use-priority-source').checked=draft.useSource;
+      $('priority-source').value=draft.source;
+      $('settings-form').dataset.dirty='true';
+      syncModeHelp();
+    }
+  }
   syncPrioritySetup();
   const sequential = state.settings.mode === "sequential";
   classroomMotion.countdown(state,previous);
   $("round-controls").hidden = !teacher || auth?.assistant || !sequential || state.phase !== "active";
   $("close-round").hidden = !state.round.round_open;
+  $('close-round').textContent=state.round.round_index===state.units.length-1?'結束最後一題並公布結果':'關閉本題';
   $("next-round").hidden = !!state.round.round_open;
   const priorityLeft = Math.max(0, Math.ceil(state.round.priority_until - state.server_time));
   const priorityActive = priorityLeft > 0 && state.phase === 'active' && (!sequential || state.round.round_open);
@@ -630,10 +735,24 @@ function renderState(state) {
     $("sheet-export").textContent = '重試同步';
   }
   if (teacher) {syncMonitorFilter(state); renderMonitor(state);} else renderCards(state);
+  if(!teacher && unconfirmedAnswers.size) {
+    const messages=[];
+    let complete=true;
+    const received=new Set(state.answers.map(answer=>answer.question_id));
+    for(const unit of state.units.filter(unit=>sequence>unconfirmedAnswers.get(unit.id))) {
+      unconfirmedAnswers.delete(unit.id);
+      const accepted=unit.questions.every(q=>received.has(q));
+      complete=complete && accepted;
+      messages.push(accepted ? `已收到本組第 ${unit.id} 題的答案。` :
+        state.available_questions.includes(unit.questions[0]) ? `第 ${unit.id} 題尚未收到，請重新送出。` : `第 ${unit.id} 題未收到，目前無法送出。`);
+    }
+    if(messages.length) notice(messages.join(' '),complete);
+  }
   if (ended) renderResults(state);
   renderTeacherWorkspace(state);
   updateInputs();
   classroomMotion.submitted(previous,state);
+  classroomMotion.studentVerdicts(previous,state);
   classroomMotion.standings(previous,state);
 }
 async function refresh() {
@@ -642,12 +761,13 @@ async function refresh() {
   // Recheck after waiting, so timer and manual refresh cannot overlap.
   if (refreshPromise) return refreshPromise;
   const ownGeneration = generation, id = activityId, token = auth.token;
+  const sequence=++snapshotSequence;
   refreshPromise = (async () => {
     try {
       const data = await api(id ? `/api/activities/${id}` : "/api/activities", undefined, token);
       if (ownGeneration !== generation) return;
       connection(true);
-      if (id) renderState(data); else renderList(data.activities);
+      if (id) renderState(data,sequence); else renderList(data.activities);
       if (auth?.role === "teacher" && !id && Date.now() - lastGoogleCheck > 5000) {
         lastGoogleCheck = Date.now(); googleStatus().catch(error => {if (ownGeneration === generation) $("google-status").textContent = error.message;});
       }
@@ -730,9 +850,17 @@ function renderReport(state) {
   if (!teacher) {
     const key=JSON.stringify([state.id,state.report]); if (key===reportKey) return; reportKey=key;
     const table=el('table'), head=el('tr');
-    for (const title of ['題號','本組答案','判定','下注','押注分','搶答分','單位合計','搶答成功','參考答案']) head.append(el('th',title));
+    for (const title of ['題號','判定','本組答案','下注','押注分','搶答分','單位合計','搶答成功','參考答案']) head.append(el('th',title));
     table.append(head);
-    for (const r of state.report) {const row=el('tr'); for (const value of [r.question,r.answer,verdictNames[r.verdict],r.stake??'—',r.wager??'—',r.speed??'—',r.points??'同題組',r.successful?'是':'否',r.reference||'老師尚未填寫']) row.append(el('td',value)); table.append(row);}
+    for (const r of state.report) {
+      const row=el('tr'); row.dataset.question=r.question;
+      row.append(el('td',r.question));
+      const verdict=el('td',verdictNames[r.verdict]);
+      if(r.verdict==='correct') verdict.replaceChildren(el('strong','正解','verdict-stamp student-stamp'));
+      row.append(verdict,el('td',r.answer));
+      for(const value of [r.stake??'—',r.wager??'—',r.speed??'—',r.points??'同題組',r.successful?'是':'否',r.reference||'老師尚未填寫']) row.append(el('td',value));
+      table.append(row);
+    }
     $('report-table').replaceChildren(table);
   }
 }
@@ -833,20 +961,25 @@ function renderQuestionSettings(state) {
     const summary=el('summary'), name=el('span',`第 ${unit.id} ${unit.questions.length>1?'題組':'題'}`), description=el('span',undefined,'question-config-summary'); summary.append(name,description);
     details.ontoggle=()=>{if(details.open) for(const other of $('question-settings-forms').children) if(other!==details) other.open=false;};
     const form=el('form',undefined,'question-config-form'), fields=el('fieldset'); form.dataset.dirty='false';
+    const draftKey=classroomDrafts.key(auth,state.id,'setup','unit/'+unit.id);
+    const draft=classroomDrafts.read(draftKey);
     const betLabel=el('label',undefined,'check-label'), betting=el('input'); betting.type='checkbox'; betting.className='betting-enabled';
-    betting.checked=state.question_settings[unit.questions[0]].betting_enabled;
+    betting.checked=draft?.betting ?? state.question_settings[unit.questions[0]].betting_enabled;
     betLabel.append(betting,document.createTextNode('開放信心下注（學生仍可選擇不押）')); fields.append(betLabel);
     const configs=[];
     for (const [childIndex,q] of unit.questions.entries()) {
       const config=state.question_settings[q], box=el('section',undefined,'question-config-child'); box.dataset.question=q;
+      const saved=draft?.questions?.[childIndex];
       const prompt=el('textarea'), promptLabel=el('label',`第 ${q} 題的題目內容（選填）`);
       prompt.id=`prompt-${index}-${childIndex}`; promptLabel.htmlFor=prompt.id; prompt.rows=3;
       prompt.defaultValue=config.prompt || ''; prompt.placeholder='輸入要讓學生閱讀的題目'; box.append(promptLabel,prompt);
+      if(saved) prompt.value=saved.prompt;
       const kind=el('select'), label=el('label',`第 ${q} 題的題型`); kind.id=`question-type-${index}-${childIndex}`; kind.className='question-type'; label.htmlFor=kind.id;
       for (const [value,title] of [['short','簡答（人工批改）'],['choice','單選（自動判分）'],['multiple','多選（全部選對才得分）']]) {const option=el('option',title); option.value=value; kind.append(option);}
-      kind.value=config.type; box.append(label,kind);
+      kind.value=saved?.kind ?? config.type; box.append(label,kind);
       const choiceBox=el('div',undefined,'choice-settings'), options=el('textarea'), optionLabel=el('label','選項（每行一個，2～8 個，每個最多 200 字）');
       options.id=`choice-options-${index}-${childIndex}`; options.className='choice-options'; options.rows=4; options.maxLength=2000; options.value=config.options.join('\n'); optionLabel.htmlFor=options.id;
+      if(saved) options.value=saved.options;
       const correct=el('select'), correctLabel=el('label','正確選項（僅老師可見）'); correct.id=`choice-correct-${index}-${childIndex}`; correct.className='choice-correct'; correctLabel.htmlFor=correct.id;
       const lines=()=>options.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
       const rebuild=(preferred)=>{
@@ -855,17 +988,25 @@ function renderQuestionSettings(state) {
         lines().forEach((answer,i)=>{const option=el('option',`${String.fromCharCode(65+i)}. ${answer}`); option.value=String(i); option.dataset.answer=answer; correct.append(option);});
         const found=lines().indexOf(old); correct.value=found<0?'':String(found);
       };
-      rebuild(config.correct_index===null?undefined:config.options[config.correct_index]);
+      rebuild(saved ? saved.correct : config.options[config.correct_index]);
       const keys=el('fieldset',undefined,'multi-checks'), rebuildKeys=selected=>fillChecks(keys,lines(),selected,'勾選全部正確選項（僅老師可見）');
-      rebuildKeys((config.correct_indices||[]).map(i=>config.options[i]));
+      rebuildKeys(saved?.keys ?? (config.correct_indices||[]).map(i=>config.options[i]));
       const toggle=()=>{choiceBox.hidden=options.disabled=kind.value==='short'; options.required=!options.disabled; correctLabel.hidden=correct.hidden=correct.disabled=kind.value!=='choice'; correct.required=!correct.disabled; keys.hidden=keys.disabled=kind.value!=='multiple';};
       kind.onchange=toggle; options.oninput=()=>{rebuild();rebuildKeys(checkedOptions(keys));}; toggle();
       choiceBox.append(optionLabel,options,correctLabel,correct,keys); box.append(choiceBox); fields.append(box);
-      configs.push({q,kind,lines,correct,prompt,keys});
+      configs.push({q,kind,lines,correct,prompt,keys,options});
     }
     const status=el('p','設定已儲存','field-hint');
     const summarize=()=>{description.textContent=`${configs.map(c=>({choice:'單選',multiple:'多選',short:'簡答'})[c.kind.value]).filter((v,i,a)=>a.indexOf(v)===i).join('＋')} · ${betting.checked?'可下注':'不押分'}`;};
-    const dirty=()=>{form.dataset.dirty='true'; status.textContent='尚未儲存，開始前會一起儲存'; summarize(); updateSetupStatus();}; form.oninput=dirty; form.onchange=dirty; summarize();
+    const markDirty=()=>{form.dataset.dirty='true'; status.textContent='尚未儲存，開始前會一起儲存'; summarize(); updateSetupStatus();};
+    form.oninput=form.onchange=()=>{
+      markDirty();
+      writeSetupDraft(draftKey,{betting:betting.checked,questions:configs.map(c=>({
+        prompt:c.prompt.value,kind:c.kind.value,options:c.options.value,
+        correct:c.correct.selectedOptions[0]?.dataset.answer || '',keys:checkedOptions(c.keys)
+      }))});
+    };
+    if(draft) markDirty(); else summarize();
     fields.append(status); form.append(fields);
     form.prepareSettings=()=>{
       const questions=configs.map(c=>({question:c.q,type:c.kind.value,options:c.kind.value==='short'?[]:c.lines(),correct_index:c.correct.value===''?null:Number(c.correct.value),correct_indices:checkedOptions(c.keys).map(v=>c.lines().indexOf(v))}));
@@ -877,7 +1018,7 @@ function renderQuestionSettings(state) {
       return {unit:unit.id,betting_enabled:betting.checked,questions};
     };
     form.persistSettings=async payload=>{
-      try {await api(`/api/activities/${state.id}/question-settings`,payload); configs.forEach((c,i)=>{if ('prompt' in payload.questions[i]) c.prompt.defaultValue=payload.questions[i].prompt;}); form.dataset.dirty='false'; status.textContent='設定已儲存'; updateSetupStatus();}
+      try {await api(`/api/activities/${state.id}/question-settings`,payload); configs.forEach((c,i)=>{if ('prompt' in payload.questions[i]) c.prompt.defaultValue=payload.questions[i].prompt;}); sessionStorage.removeItem(draftKey); form.dataset.dirty='false'; status.textContent='設定已儲存'; updateSetupStatus();}
       catch(error) {showTeacherView('questions'); details.open=true; summary.scrollIntoView({block:'center'}); throw new Error(`第 ${unit.id} 題儲存失敗：${error.message}`);}
     };
     form.onsubmit=event=>event.preventDefault();
@@ -934,10 +1075,14 @@ function renderTeacherWorkspace(state) {
   $('teacher-tabs').hidden=!teacher; $('setup-status').hidden=!teacher || !preparing;
   $('save-settings').hidden=!preparing;
   for(const id of ['replay','classification']) $(`tool-${id}`).hidden=true;
-  $('result-actions').hidden=true;
-  $('references').hidden=true;
-  $('teacher-question-filter').hidden=true;
-  if(!teacher) return;
+  const layout=$('activity').querySelector('.session-layout'), sidebar=layout.querySelector('.session-sidebar');
+  if(!teacher) {
+    for(const id of ['result-actions','references','teacher-question-filter']) $(id).hidden=true;
+    $('review-guide').hidden=true;
+    $('activity').classList.remove('grading-view','review-workspace');
+    if(sidebar!==layout.firstElementChild) layout.prepend(sidebar);
+    return;
+  }
   const key=state.id+state.phase;
   if(teacherViewKey!==key) {
     teacherViewKey=key;
@@ -946,6 +1091,18 @@ function renderTeacherWorkspace(state) {
   }
   const allowed=preparing?(auth?.assistant?['monitor']:['settings','questions','monitor']):ended?['results','monitor','tools']:['monitor','tools'];
   const pending=state.answers.filter(a=>a.verdict==='pending' && state.reviewable_questions.includes(a.question_id)).length;
+  const grading=teacherView==='monitor' && !preparing && state.reviewable_questions.length>0;
+  $('activity').classList.toggle('grading-view',grading);
+  const reviewing=!preparing && teacherView==='monitor';
+  $('activity').classList.toggle('review-workspace',reviewing);
+  $('review-guide').hidden=!reviewing;
+  const sheet=$('sheet-export-controls'), guide=$('review-guide');
+  if(reviewing) {
+    if(sheet.parentElement!==guide) guide.append(sheet);
+    renderReviewGuide(state);
+  } else if(sheet.nextElementSibling!==$('setup-status')) $('setup-status').before(sheet);
+  const referenceAnchor=grading?$('teacher-monitor'):$('teacher-question-filter');
+  if(referenceAnchor.nextElementSibling!==$('references')) referenceAnchor.after($('references'));
   for(const button of $('teacher-tabs').children) {
     button.hidden=!allowed.includes(button.dataset.view);
     button.setAttribute('aria-current',button.dataset.view===teacherView?'page':'false');
@@ -955,6 +1112,7 @@ function renderTeacherWorkspace(state) {
   for(const id of ['settings-form','question-settings','teacher-monitor','results','scoreboard','result-actions']) $(id).hidden=!sections[teacherView]?.includes(id);
   $('content-title').textContent={settings:'1. 設定活動方式',questions:'2. 設定題目與計分',monitor:preparing?'等待小組加入':'查看作答與批改',results:'本次搶答成果',tools:'更多教學工具'}[teacherView];
   $('phase-help').textContent={settings:'選擇開放方式與時間，再設定題目。',questions:'單選與多選自動批改；簡答由老師批改。開始後不能修改設定。',monitor:preparing?'分享活動代碼；同組使用相同組名。':'答案自動更新，關題後可批改。',results:'選題查看成功答案，全部組別總分列於下方。',tools:'選擇需要的工具展開。'}[teacherView];
+  if(grading) $('phase-help').textContent=pending?`本場還有 ${pending} 筆答案待批改。`:'目前沒有待批改的答案。';
   $('grading-review').hidden=!ended || !pending || teacherView==='monitor';
   $('monitor-privacy').hidden=preparing;
   for(const id of ['replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
@@ -981,7 +1139,8 @@ function activitySettingsPayload() {
   return {mode, fairness:$('quiz-fairness').checked, duration_seconds:Number($('quiz-duration').value), priority_source:source || null};
 }
 async function saveActivitySettings(payload=activitySettingsPayload()) {
-  try {await api(`/api/activities/${activityId}/settings`,payload); $('settings-form').dataset.dirty='false'; updateSetupStatus();}
+  const key=classroomDrafts.key(auth,activityId,'setup','rules');
+  try {await api(`/api/activities/${activityId}/settings`,payload); sessionStorage.removeItem(key); $('settings-form').dataset.dirty='false'; updateSetupStatus();}
   catch(error) {showTeacherView('settings'); throw new Error(`活動規則儲存失敗：${error.message}`);}
 }
 async function saveAllSettings() {
@@ -1000,6 +1159,64 @@ async function withSettingsLock(save) {
   try {await save();}
   finally {controls.forEach((control,i)=>control.disabled=previous[i]); savingSettings=false; updateInputs();}
 }
+function renderReviewGuide(state) {
+  const sequential=state.settings.mode==='sequential', ended=state.phase==='results';
+  const {round_index:index,round_open:open,unit_id:unitId}=state.round;
+  const selected=$('monitor-question').value;
+  $('guide-mode').textContent=sequential?'逐題搶答':'全題模式';
+  $('guide-round').textContent=ended?'整場已結束':sequential?
+    `目前第 ${unitId} 題 · ${open?'作答中':'已關閉'}`:'全部題目作答中';
+  const timeline=$('guide-timeline');
+  const shape=JSON.stringify([state.id,state.units]);
+  const rebuilt=timeline.dataset.shape!==shape;
+  if(rebuilt) {
+    timeline.dataset.shape=shape;
+    timeline.replaceChildren();
+    for(const unit of state.units) {
+      const item=el('li'), step=el('button');
+      step.type='button';
+      step.append(el('strong',unit.id),el('small'));
+      step.onclick=()=>{
+        const select=$('monitor-question');
+        select.value=unit.questions[0]; select.dispatchEvent(new Event('change'));
+      };
+      item.append(step); timeline.append(item);
+    }
+  }
+  const progress=JSON.stringify([index,open,ended,sequential,selected]);
+  if(rebuilt || timeline.dataset.progress!==progress) {
+    timeline.dataset.progress=progress;
+    for(const [i,item] of [...timeline.children].entries()) {
+      const unit=state.units[i], step=item.firstChild, currentUnit=sequential && !ended && index===i;
+      const upcoming=sequential && i>index;
+      const closed=ended || (sequential && (i<index || (currentUnit && !open)));
+      const status=upcoming?'未開放':closed?'已關閉':'作答中';
+      step.dataset.state=status;
+      if(currentUnit) step.setAttribute('aria-current','step'); else step.removeAttribute('aria-current');
+      step.setAttribute('aria-pressed',String(unit.questions.includes(selected)));
+      step.setAttribute('aria-label',`查看第 ${unit.id} ${unit.questions.length>1?'題組':'題'}，${status}`);
+      step.lastChild.textContent=currentUnit && !open?'本題已關閉':status;
+    }
+    if(monitorFollow && sequential && !ended) {
+      const active=timeline.children[index];
+      if(active) timeline.scrollLeft+=active.getBoundingClientRect().left-timeline.getBoundingClientRect().left;
+    }
+  }
+  const prompts=$('guide-prompts');
+  const questions=selected?[selected]:state.questions;
+  const contents=questions.map(q=>[q,state.question_settings[q]?.prompt || '']);
+  const key=JSON.stringify([selected,contents]);
+  if(prompts.dataset.value===key) return;
+  prompts.dataset.value=key;
+  $('guide-question').textContent=selected?`正在查看 · 第 ${selected} 題`:'正在查看 · 全部題目';
+  prompts.replaceChildren();
+  for(const [q,prompt] of contents) {
+    const entry=el('p');
+    if(!selected) entry.append(el('b',q+'　'));
+    entry.append(document.createTextNode(prompt || '未填寫題幹'));
+    prompts.append(entry);
+  }
+}
 function syncMonitorFilter(state) {
   const key=state.id+JSON.stringify(state.questions);
   if(monitorKey!==key) {
@@ -1013,15 +1230,25 @@ $('source-manual').onclick=()=>setCreateSource('manual'); $('source-sheets').onc
 $('custom-questions').ontoggle=syncQuestionInput;
 $('go-questions').onclick=()=>showTeacherView('questions');
 for(const button of $('teacher-tabs').children) button.onclick=()=>showTeacherView(button.dataset.view);
-$('monitor-question').onchange=()=>{monitorFollow=false;renderMonitor(current);renderTeacherReference(current);if(current.phase==='results')renderResults(current);};
-$('settings-form').oninput=$('settings-form').onchange=()=>{$('settings-form').dataset.dirty='true'; updateSetupStatus();};
+$('monitor-question').onchange=()=>{monitorFollow=false;renderMonitor(current);renderTeacherReference(current);if(current.phase==='results')renderResults(current);if(!$('review-guide').hidden)renderReviewGuide(current);};
+function writeSetupDraft(key,value) {
+  try {sessionStorage.setItem(key,JSON.stringify(value));}
+  catch {notice('瀏覽器無法保存草稿，離開前請先儲存設定。');}
+}
+$('settings-form').oninput=$('settings-form').onchange=()=>{
+  $('settings-form').dataset.dirty='true'; updateSetupStatus();
+  writeSetupDraft(classroomDrafts.key(auth,activityId,'setup','rules'),{
+    mode:$('quiz-mode').value,fairness:$('quiz-fairness').checked,duration:$('quiz-duration').value,
+    useSource:$('use-priority-source').checked,source:$('priority-source').value
+  });
+};
 $('save-settings').onclick=()=>action($('save-settings'),async()=>{
   if(savingSettings) return;
   window.courseNav.revealActivity();
   await saveAllSettings(); notice('所有設定已儲存。',true); await refresh();
 });
 $('result-actions').append($('download-csv'));
-$('teacher-tabs').after($('sheet-export-controls'));
+$('setup-status').before($('sheet-export-controls'));
 for(const [id,title] of [['replay','重播搶答過程'],['classification','比較相似答案']]) {
   const section=$(id), wrapper=el('details',undefined,'tool-disclosure panel'); wrapper.id=`tool-${id}`; wrapper.hidden=true;
   const summary=el('summary',title); section.before(wrapper); wrapper.append(summary,section);
