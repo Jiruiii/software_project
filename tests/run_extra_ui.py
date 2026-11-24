@@ -32,6 +32,9 @@ def main():
         activity = service.create(teacher, '逐題計時驗收', ['1', '2'])
         aid = activity['id']
         student = service.join(activity['code'], '計時A組')['token']
+        service.join(activity['code'], '計時B組')
+        student_c = service.join(activity['code'], '計時C組')['token']
+        student_d = service.join(activity['code'], '計時D組')['token']
         service.configure(teacher, aid, 'sequential')
         origin = time.time() - 200
         with patch('quiz_service.time.time', return_value=origin) as clock:
@@ -41,6 +44,9 @@ def main():
             service.round_action(teacher, aid, 'close')
             clock.return_value = origin + 60
             service.round_action(teacher, aid, 'next')
+            clock.return_value = origin + 61
+            service.submit(student_d, aid, '2', '先收到')
+            service.submit(student_c, aid, '2', '相同時間，後收到')
             clock.return_value = origin + 62.35
             service.submit(student, aid, '2', '第二題答案')
         # Simulate an earlier legacy round whose opening was never recorded.

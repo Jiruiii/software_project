@@ -23,6 +23,7 @@ async (page) => {
   const synced=async previous=>page.waitForFunction(previous=>current.source.sync.state==='synced' && current.source.exported_at>previous,previous);
   await page.locator('#close-round').click(); await synced(0);
   check(await page.locator('#sheet-export-controls').isVisible(),'Sync panel hidden during active activity');
+  await page.locator('#sheet-sync-status[data-state="synced"]').waitFor();
   check(await page.locator('#monitor-table [data-verdict="pending"]').count()===0,'Pending action present');
   check(!(await page.locator('#activity').innerText()).includes('未判定'),'Teacher still shows old pending wording');
   const grade=async(group,verdict)=>{

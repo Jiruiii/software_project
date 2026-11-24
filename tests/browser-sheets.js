@@ -27,8 +27,13 @@ async (page) => {
   await page.locator('#sheet-import').click();
   await page.locator('#activity').waitFor({state:'visible',timeout:45000});
   check((await page.locator('#session-subtitle').innerText()).includes('6 道題目'),'import count mismatch');
+  const checkTemplatePanel=async()=>{
+    await page.getByRole('link',{name:'開啟學習單'}).waitFor();
+    check(await page.locator('#sheet-sync-status').isHidden(),'read-only notice visible in teacher workspace');
+    check(await page.locator('#sheet-sync-help').isHidden(),'read-only template offered sync setup');
+  };
   check(await page.locator('#sheet-export').isHidden(),'export visible before end');
-  await page.locator('#sheet-sync-status').filter({hasText:'官方範本僅供讀取'}).waitFor();
+  await checkTemplatePanel();
   const code=await page.locator('#session-code').innerText();
   const student=await page.context().newPage(); await student.goto(base);
   await student.locator('#join-code').fill(code); await student.locator('#join-group').fill('範本測試組');
@@ -38,13 +43,13 @@ async (page) => {
   check(await student.locator('#sheet-export-controls').isHidden(),'student can see source');
   await page.locator('#start').click();
   await student.locator('#answer-0').fill('範本測試答案');
+  await checkTemplatePanel();
   await student.locator('.question-card').first().getByRole('button').click();
   await student.locator('.saved-answer').first().filter({hasText:'範本測試答案'}).waitFor();
   await page.locator('#end').click(); await page.locator('#confirm-end').click();
   await page.locator('#results').waitFor();
-  await page.locator('#sheet-sync-status').filter({hasText:'官方範本僅供讀取'}).waitFor();
+  await checkTemplatePanel();
   check(await page.locator('#sheet-export').isHidden(),'offered retry for a read-only template');
-  check(await page.locator('#sheet-sync-help').isHidden(),'read-only template offered sync setup');
   const denied=await page.evaluate(async()=>{
     const aid=sessionStorage.getItem('classroom.activity');
     const {token}=JSON.parse(sessionStorage.getItem('classroom.auth'));

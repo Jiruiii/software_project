@@ -356,10 +356,17 @@ function renderMonitor(state) {
   const wrap = $("monitor-table"); wrap.replaceChildren();
   if (!state.groups.length) {wrap.append(el("p", auth?.course ? "還沒有小組進入活動。學生可從課程首頁進入。" : "還沒有小組加入。將上方活動代碼提供給同學即可加入。", "empty")); return;}
   const table = el("table"), thead = el("thead"), head = el("tr");
-  head.append(el("th", "小組")); for (const q of questions) head.append(el("th", `第 ${q} 題`)); thead.append(head);
+  const singleQuestion = questions.length === 1;
+  head.append(el("th", singleQuestion ? "小組（先交卷在上）" : "小組")); for (const q of questions) head.append(el("th", `第 ${q} 題`)); thead.append(head);
   const body = el("tbody");
   const lookup = new Map(state.answers.map(a => [JSON.stringify([a.group_id,a.question_id]), a]));
-  for (const group of state.groups) {
+  let groups = state.groups;
+  if (singleQuestion) {
+    const receipts = new Map(state.answers.filter(a => a.question_id === questions[0]).map(a => [a.group_id, a.id]));
+    const receiptOrder = group => receipts.get(group.id) ?? Number.MAX_SAFE_INTEGER;
+    groups = [...groups].sort((a, b) => receiptOrder(a) - receiptOrder(b));
+  }
+  for (const group of groups) {
     const row = el("tr"); row.append(el("th", group.name));
     for (const q of questions) {
       const cell = el("td"), answer = lookup.get(JSON.stringify([group.id,q]));
