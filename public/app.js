@@ -602,7 +602,7 @@ function renderState(state) {
   }
   syncPrioritySetup();
   const sequential = state.settings.mode === "sequential";
-  classroomMotion.countdown(state);
+  classroomMotion.countdown(state,previous);
   $("round-controls").hidden = !teacher || auth?.assistant || !sequential || state.phase !== "active";
   $("close-round").hidden = !state.round.round_open;
   $("next-round").hidden = !!state.round.round_open;

@@ -5,20 +5,20 @@ const classroomMotion = (() => {
   let priorityKey = '', priorityTimer = 0;
   let countdownKey = '', countdownTimer = 0, answerEndsAt = 0, expiryAction = '';
   let podiumObserver = null, podiumPlayed = false;
-  const soundToggle = document.getElementById('heartbeat-enabled');
-  const soundSetting = document.getElementById('heartbeat-setting');
-  const previewButton = document.getElementById('heartbeat-preview');
-  const soundNote = document.getElementById('heartbeat-error');
+  const soundToggle = document.getElementById('countdown-sound-enabled');
+  const soundSetting = document.getElementById('countdown-sound-setting');
+  const previewButton = document.getElementById('countdown-sound-preview');
+  const soundNote = document.getElementById('countdown-sound-error');
   const Audio = window.AudioContext || window.webkitAudioContext;
   const soundPreference = 'classroom.countdownSound';
   try { soundToggle.checked = localStorage.getItem(soundPreference)!=='muted'; } catch { /* Use the page default. */ }
-  let soundContext = null, bufferLoad = null, heartbeat = null, playing = null;
+  let soundContext = null, bufferLoad = null, countdownBuffer = null, playing = null;
   let preview = null, previewRequest = 0, soundFailed = false;
 
   function updateSoundControls() {
     previewButton.disabled = !soundToggle.checked;
     let hint = '';
-    if (soundToggle.checked && soundFailed) hint = '音效載入失敗，請按「試聽心跳聲」重試。';
+    if (soundToggle.checked && soundFailed) hint = '音效載入失敗，請按「試聽倒數音效」重試。';
     else if (soundToggle.checked && soundContext?.state!=='running') hint = '點一下畫面即可啟用聲音，也可以先試聽。';
     if (soundNote.textContent!==hint) soundNote.textContent = hint;
     soundNote.hidden = !hint;
@@ -31,58 +31,61 @@ const classroomMotion = (() => {
     preview = null;
   }
 
-  function stopHeartbeat() {
+  function stopCountdownSound() {
     if (!playing) return;
     playing.stop();
     playing.disconnect();
     playing = null;
   }
-  function syncHeartbeat(remaining = (answerEndsAt-performance.now())/1000) {
-    if (!countdownKey || remaining<=0 || remaining>3 || document.hidden || !soundToggle.checked ||
-        $('heartbeat-setting').hidden || soundContext?.state!=='running') {
-      stopHeartbeat();
+  function syncCountdownSound(remaining = (answerEndsAt-performance.now())/1000) {
+    if (document.hidden || !soundToggle.checked || soundContext?.state!=='running') {
+      stopCountdownSound();
       return;
     }
-    if (playing || !heartbeat) return;
+    if (playing || !countdownKey || remaining<=0 || remaining>3 || !countdownBuffer) return;
     stopPreview();
-    const offset = Math.max(0, heartbeat.duration-remaining);
-    playing = soundContext.createBufferSource();
-    playing.buffer = heartbeat;
-    playing.connect(soundContext.destination);
-    playing.start(0,offset);
+    // The first three seconds count down; the final chime rings beyond the deadline.
+    const source = soundContext.createBufferSource();
+    playing = source;
+    source.buffer = countdownBuffer;
+    source.connect(soundContext.destination);
+    source.onended = () => {
+      if (playing===source) { source.disconnect(); playing = null; }
+    };
+    source.start(0,3-remaining);
   }
   function closeAudio() {
     stopPreview();
-    stopHeartbeat();
+    stopCountdownSound();
     const context = soundContext;
     soundContext = null;
-    heartbeat = null;
+    countdownBuffer = null;
     bufferLoad = null;
     if (context) {
       context.onstatechange = null;
       context.close().catch(()=>{});
     }
   }
-  async function loadHeartbeat(context) {
-    const response = await fetch('/priority-heartbeat.wav');
-    if (!response.ok) throw Error('heartbeat');
+  async function loadCountdownSound(context) {
+    const response = await fetch('/electronic-countdown.wav');
+    if (!response.ok) throw Error('Countdown audio unavailable');
     return context.decodeAudioData(await response.arrayBuffer());
   }
   async function prepareAudio() {
     let context;
     try {
       context = soundContext || (soundContext = new Audio());
-      context.onstatechange = () => { updateSoundControls(); syncHeartbeat(); };
+      context.onstatechange = () => { updateSoundControls(); syncCountdownSound(); };
       const resumed = context.state==='running' ? undefined : context.resume();
       // Unlock on the join/start gesture, even if the timed activity state is still arriving.
-      if (!soundSetting.hidden) bufferLoad ??= loadHeartbeat(context);
+      if (!soundSetting.hidden) bufferLoad ??= loadCountdownSound(context);
       updateSoundControls();
       const [,buffer] = await Promise.all([resumed,bufferLoad]);
       if (context!==soundContext) return false;
-      if (buffer) heartbeat = buffer;
+      if (buffer) countdownBuffer = buffer;
       updateSoundControls();
-      syncHeartbeat();
-      return !!heartbeat && context.state==='running';
+      syncCountdownSound();
+      return !!countdownBuffer && context.state==='running';
     } catch {
       if (context && context!==soundContext) return false;
       closeAudio();
@@ -92,7 +95,7 @@ const classroomMotion = (() => {
     }
   }
   function unlockOnInteraction(event) {
-    if (!Audio || !event.isTrusted || event.target.closest?.('#heartbeat-setting label, #heartbeat-preview') || !soundToggle.checked || soundFailed) return;
+    if (!Audio || !event.isTrusted || event.target.closest?.('#countdown-sound-setting label, #countdown-sound-preview') || !soundToggle.checked || soundFailed) return;
     if (soundContext?.state!=='running') prepareAudio();
   }
   document.addEventListener('click',unlockOnInteraction,true);
@@ -112,29 +115,29 @@ const classroomMotion = (() => {
     if (!await prepareAudio() || atDeadline || request!==previewRequest || document.hidden || soundSetting.hidden || playing) return;
     const source = soundContext.createBufferSource();
     preview = source;
-    source.buffer = heartbeat;
+    source.buffer = countdownBuffer;
     source.connect(soundContext.destination);
     source.onended = () => {
       if (preview===source) { source.disconnect(); preview = null; }
     };
-    source.start(0,0,0.65);
+    source.start(0,0,countdownBuffer.duration);
   };
   function pauseCountdown() {
     clearTimeout(countdownTimer);
     stopPreview();
-    stopHeartbeat();
+    stopCountdownSound();
   }
   function tickCountdown() {
     clearTimeout(countdownTimer);
     if (document.hidden) {pauseCountdown(); return;}
-    if (!countdownKey) {stopHeartbeat(); return;}
+    if (!countdownKey) return;
     const ms = Math.max(0,answerEndsAt-performance.now());
     const seconds = Math.ceil(ms/1000);
     $('countdown').textContent = `剩餘 ${seconds} 秒 · 到期自動${expiryAction}`;
-    syncHeartbeat(ms/1000);
+    syncCountdownSound(ms/1000);
     if (seconds>0) countdownTimer = setTimeout(tickCountdown,Math.ceil(ms-(seconds-1)*1000));
   }
-  function countdown(state) {
+  function countdown(state,previous) {
     const timed = state.settings.duration_seconds>0;
     const sequential = state.settings.mode==='sequential';
     const {deadline,round_index,round_open} = state.round;
@@ -149,7 +152,12 @@ const classroomMotion = (() => {
     $('countdown').hidden = !active;
     const key = active ? `${state.id}/${round_index}/${deadline}` : '';
     if (key===countdownKey) return;
-    pauseCountdown();
+    clearTimeout(countdownTimer);
+    stopPreview();
+    const priorDeadline = previous?.round.deadline;
+    const expired = !active && timed && previous?.id===state.id && previous.round.round_index===round_index &&
+      Number.isFinite(priorDeadline) && (state.ended_at ?? state.server_time)>=priorDeadline;
+    if (!expired) stopCountdownSound();
     countdownKey = key;
     if (!active) return;
     answerEndsAt = performance.now()+(deadline-state.server_time)*1000;

@@ -83,7 +83,7 @@ async page => {
 
   const low = await page.context().newPage();
   const high = await page.context().newPage();
-  const sound = tab=>tab.getByRole('checkbox',{name:'作答倒數最後 3 秒播放心跳聲'});
+  const sound = tab=>tab.getByRole('checkbox',{name:'作答倒數最後 3 秒播放提示音'});
   function observeAudio() {
     const prototype=AudioBufferSourceNode.prototype;
     const start=prototype.start, stop=prototype.stop;
@@ -100,37 +100,39 @@ async page => {
       outputs.set(this,meter);
       return destination;
     };
-    window.heartbeats={starts:[],previews:[],stops:0,decoded:0};
+    window.countdownAudio={starts:[],previews:[],stops:0,decoded:0};
     const decode=AudioContext.prototype.decodeAudioData;
     AudioContext.prototype.decodeAudioData=async function(...args) {
       const buffer=await decode.apply(this,args);
-      heartbeats.decoded++;
+      countdownAudio.decoded++;
       return buffer;
     };
     prototype.start=function(when,offset=0,...rest) {
       const result=start.call(this,when,offset,...rest);
       const record={offset,duration:this.buffer.duration,countdown:document.getElementById('countdown').textContent,
-        peak:[0,0,0],midDb:[-100,-100,-100]};
-      (rest.length ? heartbeats.previews : heartbeats.starts).push(record);
+        peak:[0,0,0,0],toneDb:[-100,-100,-100,-100],ended:false};
+      (rest.length ? countdownAudio.previews : countdownAudio.starts).push(record);
       if (!rest.length) countdownSources.add(this);
       const context=this.context, playedAt=context.currentTime;
       const meter=outputs.get(this);
-      if (!meter) throw Error('心跳音源未接上分頁輸出');
+      if (!meter) throw Error('倒數音效音源未接上分頁輸出');
       const samples=new Float32Array(meter.fftSize), bins=new Float32Array(meter.frequencyBinCount);
       const timer=setInterval(()=>{
         const second=Math.floor(context.currentTime-playedAt+offset);
-        if (second<0 || second>=3) return;
+        if (second<0 || second>=4) return;
         meter.getFloatTimeDomainData(samples);
         meter.getFloatFrequencyData(bins);
         for(const s of samples) record.peak[second]=Math.max(record.peak[second],Math.abs(s));
         const hz=context.sampleRate/meter.fftSize;
-        for(let i=Math.ceil(250/hz);i<=Math.floor(750/hz);i++) record.midDb[second]=Math.max(record.midDb[second],bins[i]);
+        const frequency=second===3 ? 1046 : 523;
+        const bin=Math.round(frequency/hz);
+        record.toneDb[second]=Math.max(record.toneDb[second],bins[bin]);
       },15);
-      this.addEventListener('ended',()=>{clearInterval(timer);meter.disconnect();},{once:true});
+      this.addEventListener('ended',()=>{record.ended=true;clearInterval(timer);meter.disconnect();},{once:true});
       return result;
     };
     prototype.stop=function(...args) {
-      if (countdownSources.has(this)) heartbeats.stops++;
+      if (countdownSources.has(this)) countdownAudio.stops++;
       return stop.apply(this,args);
     };
   }
@@ -144,8 +146,9 @@ async page => {
     for(const tab of [page,low,high]) {
       if(!await sound(tab).isVisible() || !await sound(tab).isChecked()) throw Error('限時活動應向師生預設開啟倒數聲');
     }
-    await low.getByRole('button',{name:'試聽心跳聲'}).click();
-    await low.waitForFunction(()=>heartbeats.previews[0]?.peak[0]>.18 && heartbeats.previews[0].midDb[0]>-43);
+    await low.getByRole('button',{name:'試聽倒數音效'}).click();
+    await low.waitForFunction(()=>countdownAudio.previews[0]?.ended);
+    if(!await low.evaluate(()=>countdownAudio.previews[0].toneDb.every(v=>v>-43))) throw Error('試聽缺少倒數或收尾音');
     await sound(high).uncheck();
     await high.reload();
     await sound(high).waitFor();
@@ -160,32 +163,32 @@ async page => {
     await low.evaluate(()=>refresh());
     await high.waitForFunction(() => !document.querySelector('.question-card button').disabled && document.querySelector('#round-status').hidden);
     if(await high.locator('#priority-track').isVisible()) throw Error('保底結束後仍顯示倒數線');
-    if(await low.evaluate(()=>heartbeats.starts.length) || await high.evaluate(()=>heartbeats.starts.length)) throw Error('開場保底三秒不應播放心跳');
+    if(await low.evaluate(()=>countdownAudio.starts.length) || await high.evaluate(()=>countdownAudio.starts.length)) throw Error('開場保底三秒不應播放倒數音效');
     await high.locator('#answer-0').fill('一般作答');
     await high.locator('.question-card button').click();
     await high.waitForFunction(() => current.answers[0]?.text === '一般作答');
-    await low.waitForFunction(()=>heartbeats.starts.length===1);
-    const first=await low.evaluate(()=>heartbeats.starts[0]);
-    if(first.duration!==3 || !first.countdown.startsWith('剩餘 3 秒')) throw Error('開啟音效後應在作答剩三秒時開始播放');
-    if(await high.evaluate(()=>heartbeats.starts.length)) throw Error('靜音的學生播放了心跳');
+    await low.waitForFunction(()=>countdownAudio.starts.length===1);
+    const first=await low.evaluate(()=>countdownAudio.starts[0]);
+    if(Math.abs(first.duration-4.66)>.001 || first.offset>.2 || !first.countdown.startsWith('剩餘 3 秒')) throw Error('完整音檔應在作答剩三秒時從開頭播放');
+    if(await high.evaluate(()=>countdownAudio.starts.length)) throw Error('靜音的學生播放了倒數音效');
     await sound(high).check();
-    await high.waitForFunction(()=>heartbeats.starts.length===1);
-    const late=await high.evaluate(()=>heartbeats.starts[0]);
+    await high.waitForFunction(()=>countdownAudio.starts.length===1);
+    const late=await high.evaluate(()=>countdownAudio.starts[0]);
     if(late.offset<=0 || late.offset>=3 || !/剩餘 [1-3] 秒/.test(late.countdown)) throw Error('中途開啟應只播放剩餘部分');
-    await high.getByRole('button',{name:'試聽心跳聲'}).click();
-    if(await high.evaluate(()=>heartbeats.previews.length)) throw Error('試聽與真正倒數重疊');
+    await high.getByRole('button',{name:'試聽倒數音效'}).click();
+    if(await high.evaluate(()=>countdownAudio.previews.length)) throw Error('試聽與真正倒數重疊');
     for(const tab of [page,low,high]) {
-      await tab.waitForFunction(()=>heartbeats.stops>=1);
-      if(await tab.evaluate(()=>heartbeats.starts.length!==1)) throw Error('更新狀態時重播了倒數');
+      await tab.waitForFunction(()=>countdownAudio.starts[0].ended);
+      if(await tab.evaluate(()=>countdownAudio.starts.length!==1 || countdownAudio.stops!==0)) throw Error('自然到期應播放一次且保留收尾');
     }
     for(const tab of [page,low]) {
-      if(!await tab.evaluate(()=>heartbeats.starts[0].peak.every(v=>v>.18) && heartbeats.starts[0].midDb.every(v=>v>-43)))
-        throw Error('師生的實際輸出在最後三秒應每秒都有可辨識的心跳');
+      if(!await tab.evaluate(()=>countdownAudio.starts[0].peak.every(v=>v>.18) && countdownAudio.starts[0].toneDb.every(v=>v>-43)))
+        throw Error('師生的實際輸出應有三聲倒數和到期的高音');
     }
     await low.waitForFunction(()=>current.phase==='results');
     await verifyAudioLifecycle(low);
     await verifySequentialCountdown(low);
-    const output=await page.evaluate(()=>heartbeats.starts[0]);
+    const output=await page.evaluate(()=>countdownAudio.starts[0]);
     return {passed:true, sourceSaved:true, bothStudentStates:true, submittedAfterWindow:true,
       answerDeadline:true,sequentialCountdown:true,teacherAndStudentSignal:true,previewSignal:true,
       teacherPeakBySecond:output.peak.map(v=>Number(v.toFixed(2))),
@@ -208,15 +211,17 @@ async page => {
     await openRoom(tab,student,activity.id);
     await tab.locator('#content-title').click();
     await post(teacher,path+'/start');
-    await tab.waitForFunction(()=>heartbeats.starts.length===1);
+    await tab.waitForFunction(()=>countdownAudio.starts.length===1);
     await post(teacher,path+'/round',{action:'close'});
-    await tab.waitForFunction(()=>!current.round.round_open && heartbeats.stops===1);
+    await tab.waitForFunction(()=>!current.round.round_open && countdownAudio.stops===1);
+    if(await tab.evaluate(()=>countdownAudio.starts[0].peak[3]>0)) throw Error('提早關題仍播放截止音');
     await post(teacher,path+'/round',{action:'next'});
     await tab.waitForFunction(()=>current.round.unit_id==='2' && current.round.round_open);
-    if(await tab.evaluate(()=>heartbeats.starts.length!==1)) throw Error('第二題開放時太早播放心跳');
-    await tab.waitForFunction(()=>heartbeats.starts.length===2);
-    await tab.waitForFunction(()=>current.phase==='results' && heartbeats.stops===2);
-    if(await tab.evaluate(()=>heartbeats.starts.some(play=>!play.countdown.startsWith('剩餘 3 秒')))) throw Error('逐題心跳沒有對準最後三秒');
+    if(await tab.evaluate(()=>countdownAudio.starts.length!==1)) throw Error('第二題開放時太早播放倒數音效');
+    await tab.waitForFunction(()=>countdownAudio.starts.length===2);
+    await tab.waitForFunction(()=>current.phase==='results' && countdownAudio.starts[1].ended);
+    if(await tab.evaluate(()=>countdownAudio.stops!==1 || countdownAudio.starts[1].toneDb[3]<=-43)) throw Error('逐題自然截止時高音遭切斷');
+    if(await tab.evaluate(()=>countdownAudio.starts.some(play=>!play.countdown.startsWith('剩餘 3 秒')))) throw Error('逐題倒數音效沒有對準最後三秒');
   }
 
   async function verifyAudioLifecycle(tab) {
@@ -235,39 +240,39 @@ async page => {
         document.dispatchEvent(new Event('visibilitychange'));
       };
       showCountdown(2.8,true,0);
-      if(heartbeats.starts.length!==1) throw Error('無期限不應播放心跳');
+      if(countdownAudio.starts.length!==1) throw Error('無期限不應播放倒數音效');
       showCountdown(2.8,true);
     });
-    await tab.waitForFunction(()=>heartbeats.starts.length===2);
+    await tab.waitForFunction(()=>countdownAudio.starts.length===2);
     await tab.evaluate(()=>simulateHidden(true));
-    await tab.waitForFunction(()=>heartbeats.stops===2);
+    await tab.waitForFunction(()=>countdownAudio.stops===1);
     await tab.evaluate(()=>simulateHidden(false));
-    await tab.waitForFunction(()=>heartbeats.starts.length===3);
-    const offsets=await tab.evaluate(()=>heartbeats.starts.slice(-2).map(s=>s.offset));
+    await tab.waitForFunction(()=>countdownAudio.starts.length===3);
+    const offsets=await tab.evaluate(()=>countdownAudio.starts.slice(-2).map(s=>s.offset));
     if(offsets[1]<=offsets[0]) throw Error('切回分頁後從頭重播');
     await sound(tab).uncheck();
-    await tab.waitForFunction(()=>heartbeats.stops===3);
-    await tab.route('**/priority-heartbeat.wav',route=>route.fulfill({status:503,body:''}));
+    await tab.waitForFunction(()=>countdownAudio.stops===2);
+    await tab.route('**/electronic-countdown.wav',route=>route.fulfill({status:503,body:''}));
     await sound(tab).check();
-    await tab.getByText('音效載入失敗，請按「試聽心跳聲」重試。').waitFor();
+    await tab.getByText('音效載入失敗，請按「試聽倒數音效」重試。').waitFor();
     if(!await sound(tab).isChecked()) throw Error('載入失敗不應覆寫音效偏好');
-    await tab.unroute('**/priority-heartbeat.wav');
+    await tab.unroute('**/electronic-countdown.wav');
     await tab.evaluate(()=>showCountdown(0));
     let deliver;
     const hold=new Promise(resolve=>{deliver=resolve;});
-    await tab.route('**/priority-heartbeat.wav',async route=>{await hold;await route.fallback();});
-    const decoded=await tab.evaluate(()=>heartbeats.decoded);
-    const request=tab.waitForRequest('**/priority-heartbeat.wav');
-    await tab.getByRole('button',{name:'試聽心跳聲'}).click();
+    await tab.route('**/electronic-countdown.wav',async route=>{await hold;await route.fallback();});
+    const decoded=await tab.evaluate(()=>countdownAudio.decoded);
+    const request=tab.waitForRequest('**/electronic-countdown.wav');
+    await tab.getByRole('button',{name:'試聽倒數音效'}).click();
     await request;
     await tab.evaluate(()=>{showCountdown(1.8,true);showCountdown(0);});
     deliver();
-    await tab.waitForFunction(before=>heartbeats.decoded>before,decoded);
-    if(await tab.evaluate(()=>heartbeats.starts.length!==3)) throw Error('關題後才載入的音軌不應播放');
+    await tab.waitForFunction(before=>countdownAudio.decoded>before,decoded);
+    if(await tab.evaluate(()=>countdownAudio.starts.length!==3)) throw Error('關題後才載入的音軌不應播放');
     await tab.evaluate(()=>showCountdown(2.5,true));
-    await tab.waitForFunction(()=>heartbeats.starts.length===4);
+    await tab.waitForFunction(()=>countdownAudio.starts.length===4);
     await tab.evaluate(()=>classroomMotion.reset());
-    if(await tab.evaluate(()=>heartbeats.stops!==4 || !document.getElementById('heartbeat-setting').hidden ||
-        !document.getElementById('heartbeat-enabled').checked)) throw Error('離開活動後應停止心跳並保留偏好');
+    if(await tab.evaluate(()=>countdownAudio.stops!==3 || !document.getElementById('countdown-sound-setting').hidden ||
+        !document.getElementById('countdown-sound-enabled').checked)) throw Error('離開活動後應停止倒數音效並保留偏好');
   }
 }
