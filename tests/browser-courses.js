@@ -79,6 +79,9 @@ async page => {
   await page.getByRole('heading',{name:'我的課程'}).waitFor();
   if(await page.locator('#login-roles').isVisible() || await rail.getByText('加入小組').count() || await page.locator('#workspace form').count()) throw Error('教師首頁角色或內容錯誤');
   if(!await rail.evaluate(e=>e.closest('.topbar')?.contains(e)) || await directory.isVisible()) throw Error('桌面功能應直接列在頂列');
+  const primary=rail.locator('.nav-primary');
+  if(await primary.evaluate(el=>getComputedStyle(el).backgroundColor)!=='rgba(0, 0, 0, 0)') throw Error('桌面導覽應沿用頁首底色');
+  if(await primary.locator('[aria-current="page"]').evaluate(el=>getComputedStyle(el).boxShadow)==='none') throw Error('目前頁面的底線消失');
   if(await rail.getByText('我的帳號資料',{exact:true}).count() || await rail.getByText('登出 Google 帳號').count()) throw Error('工作區導覽重複列出帳號操作');
   await button('帳號選單').click();
   const accountMenu=page.locator('#work-menu');
@@ -118,7 +121,24 @@ async page => {
   await historyTab.getByRole('link',{name:'學生作答與批改'}).click();
   if(await historyTab.getByLabel('選擇課程').inputValue()!==mathCode) throw Error('批改頁跳到其他課程');
   await historyTab.close();
+  const courseToolbar=page.locator('#workspace .course-toolbar');
+  const createActivity=courseToolbar.getByRole('button',{name:'建立搶答活動'});
+  const reviewActivity=courseToolbar.getByRole('button',{name:'學生作答與批改'});
+  for(const width of [320,1360]) {
+    await page.setViewportSize({width,height:950});
+    if(await courseToolbar.evaluate(el=>getComputedStyle(el).backgroundColor)!=='rgba(0, 0, 0, 0)') throw Error('課程操作列應透出黑板底色');
+    const bg=el=>getComputedStyle(el).backgroundColor;
+    if(await createActivity.evaluate(bg)===await reviewActivity.evaluate(bg)) throw Error('無法區分課程主要與次要按鈕');
+    if(width===320) {
+      const last=await courseToolbar.getByRole('button',{name:'課程排行榜'}).boundingBox();
+      const first=await createActivity.boundingBox();
+      if(last.y<first.y+first.height || last.x+last.width>width) throw Error('窄版課程操作列未換行');
+    }
+  }
   await page.screenshot({path:'output/playwright/course-workspace-desktop.png'});
+  await createActivity.focus();
+  await page.keyboard.press('Tab');
+  if(!await reviewActivity.evaluate(el=>el.matches(':focus-visible') && getComputedStyle(el).outlineStyle!=='none')) throw Error('課程操作的鍵盤焦點不清楚');
   const courseMenu=rail.getByRole('button',{name:'生物',exact:true});
   await courseMenu.press('Enter');
   await rail.getByRole('link',{name:'課程活動'}).focus();
@@ -300,7 +320,7 @@ async page => {
   await page.locator('.answer-record').getByText('測試答案').waitFor();
   await page.locator('.answer-record').getByText('等待公布').waitFor();
   await page.setViewportSize({width:390,height:800});
-  if(await page.locator('#work-rail').isVisible()) throw Error('手機導覽應收合');
+  await expectDirectory(false);
   if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)) throw Error('手機紀錄頁橫向溢出');
   await page.screenshot({path:'output/playwright/course-history-mobile.png'});
   await button('展開目錄').click();

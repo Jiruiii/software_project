@@ -524,16 +524,9 @@ td small { display: block; color: var(--muted); margin-block: 4px; }
 /* Course shelves and the teacher's reading desk. */
 .course-home .panel:has(.course-toolbar) { padding-top: 16px; }
 .course-toolbar {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-  padding: 8px; margin-bottom: 24px; border-radius: 8px;
-  color: #263e34; background: #e7e9dc;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-bottom: 24px;
 }
-.course-toolbar button { min-height: 40px; padding: 6px 15px; }
-.course-toolbar .primary { background: #284c40; color: #fff9df; }
-.course-toolbar .primary:hover { background: #345f51; }
-.course-toolbar .secondary { background: transparent; border-color: transparent; color: inherit; }
-.course-toolbar .secondary:hover { background: #d5dccd; }
-.course-toolbar :focus-visible { outline-color: #3d6659; outline-offset: 0; }
 .index-heading { align-items: center; justify-content: flex-start; margin-bottom: 12px; }
 .index-heading h2 { margin: 0; }
 .gallery-controls { display: flex; margin-left: auto; gap: 6px; }
@@ -625,19 +618,11 @@ button.gallery-card:hover { border-color: var(--chalk); background: var(--surfac
   .review-workspace .session-layout { grid-template-columns: minmax(0,1fr); grid-template-areas: "guide" "grading" "details"; grid-template-rows: auto; }
   .review-workspace .session-main { margin-top: 0; }
   #guide-prompts { max-height: 7rem; }
-  .course-toolbar { gap: 2px; }
   .course-toolbar button { padding-inline: 12px; }
   .session-actions { flex: 0 1 auto; }
   .section-heading:has(#end:not([hidden])) { flex-wrap: wrap; }
 }
 @media (min-width: 1121px) {
-  .topbar .nav-primary {
-    background: #e7e9dc; padding: 3px; border-radius: 7px; gap: 2px;
-  }
-  .topbar .nav-primary .work-link { color: #263e34; }
-  .topbar .nav-primary .work-link:hover { background: #d5dccd; }
-  .topbar .nav-primary .work-link[aria-current] { background: #284c40; color: #fff9df; box-shadow: none; }
-  .topbar .nav-primary .work-link:focus-visible { outline-color: #4c715f; outline-offset: 0; }
   .course-index .course-toolbar { display: none; }
 }
 #guide-timeline button[aria-current="step"] { border-top-color: var(--signal); }
