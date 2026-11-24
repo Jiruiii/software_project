@@ -103,9 +103,25 @@ async page => {
     await receipt.getByText('已復原').waitFor();
     check(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')==='海獺組 第 1 題判為正確'),'復原後焦點未回原題');
     check(await page.evaluate(()=>motionCounts['chalk-answer'])===2,'復原未重現字跡');
-    await judge('山雀組','錯誤');
-    await receipt.getByText('已判錯').waitFor();
-    check(await page.evaluate(()=>motionCounts['eraser-sweep'])===1,'非領先組觸發擦除');
+    await page.setViewportSize({width:390,height:520});
+    const peerWrong=page.getByRole('button',{name:'山雀組 第 1 題判為錯誤',exact:true});
+    await peerWrong.evaluate(button=>button.scrollIntoView({block:'end'}));
+    await peerWrong.click();
+    await receipt.getByText('山雀組 判錯',{exact:true}).waitFor();
+    check(await page.evaluate(()=>motionCounts['eraser-sweep'])===2,'非領先組判錯未播放板擦');
+    check(!await receipt.locator('.review-outcome').count(),'非領先組顯示了遞補結果');
+    check(await stage.evaluate(el=>{
+      const rect=el.getBoundingClientRect(), table=el.closest('.table-scroll').getBoundingClientRect();
+      return rect.bottom<=Math.min(table.bottom,innerHeight)+1 && rect.top>=Math.max(table.top,0)-1;
+    }),'窄螢幕上看不到本次判錯回饋');
+    await page.evaluate(()=>refresh());
+    check(await page.evaluate(()=>motionCounts['eraser-sweep'])===2,'輪詢重播非領先組判錯');
+    await undo.click();
+    await receipt.getByText('已復原').waitFor();
+    check(await page.evaluate(()=>motionCounts['chalk-answer'])===4,'非領先組復原未重現字跡');
+    await peerWrong.click();
+    await receipt.getByText('山雀組 判錯',{exact:true}).waitFor();
+    await page.setViewportSize(desktop);
     await judge('海獺組','錯誤');
     await receipt.getByText('沒有其他候選答案').waitFor();
     await undo.click();
@@ -161,7 +177,7 @@ async page => {
     await page.evaluate(async()=>{window.releaseGrade();await refresh();});
     check(!await receipt.count() && !await page.evaluate(()=>motionCounts['eraser-sweep']),'上一場回應影響新活動');
     check(!errors.length,errors.join('\n'));
-    return {passed:true,erase:true,stamp:true,undo:true,peerCandidate:true,noCandidate:true,
+    return {passed:true,erase:true,nonLeaderErase:true,visibleFeedback:true,stamp:true,undo:true,peerCandidate:true,noCandidate:true,
       noReplay:true,sessionIsolation:true,receipt:true,podium:true,tiedFirst:true,keyboard:true,reducedMotion:true,mobile:true};
   } finally {await student.close();}
 }

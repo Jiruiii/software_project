@@ -6,8 +6,30 @@ const classroomMotion = (() => {
   let countdownKey = '', countdownTimer = 0, answerEndsAt = 0, expiryAction = '';
   let podiumObserver = null, podiumPlayed = false;
   const soundToggle = document.getElementById('heartbeat-enabled');
+  const soundSetting = document.getElementById('heartbeat-setting');
+  const previewButton = document.getElementById('heartbeat-preview');
+  const soundNote = document.getElementById('heartbeat-error');
   const Audio = window.AudioContext || window.webkitAudioContext;
-  let soundContext = null, heartbeat = null, playing = null;
+  const soundPreference = 'classroom.countdownSound';
+  try { soundToggle.checked = localStorage.getItem(soundPreference)!=='muted'; } catch { /* Use the page default. */ }
+  let soundContext = null, bufferLoad = null, heartbeat = null, playing = null;
+  let preview = null, previewRequest = 0, soundFailed = false;
+
+  function updateSoundControls() {
+    previewButton.disabled = !soundToggle.checked;
+    let hint = '';
+    if (soundToggle.checked && soundFailed) hint = '音效載入失敗，請按「試聽心跳聲」重試。';
+    else if (soundToggle.checked && soundContext?.state!=='running') hint = '點一下畫面即可啟用聲音，也可以先試聽。';
+    if (soundNote.textContent!==hint) soundNote.textContent = hint;
+    soundNote.hidden = !hint;
+  }
+  function stopPreview() {
+    previewRequest++;
+    if (!preview) return;
+    preview.stop();
+    preview.disconnect();
+    preview = null;
+  }
 
   function stopHeartbeat() {
     if (!playing) return;
@@ -22,18 +44,20 @@ const classroomMotion = (() => {
       return;
     }
     if (playing || !heartbeat) return;
+    stopPreview();
     const offset = Math.max(0, heartbeat.duration-remaining);
     playing = soundContext.createBufferSource();
     playing.buffer = heartbeat;
     playing.connect(soundContext.destination);
     playing.start(0,offset);
   }
-  function disableHeartbeat() {
+  function closeAudio() {
+    stopPreview();
     stopHeartbeat();
     const context = soundContext;
     soundContext = null;
     heartbeat = null;
-    soundToggle.checked = false;
+    bufferLoad = null;
     if (context) {
       context.onstatechange = null;
       context.close().catch(()=>{});
@@ -44,32 +68,66 @@ const classroomMotion = (() => {
     if (!response.ok) throw Error('heartbeat');
     return context.decodeAudioData(await response.arrayBuffer());
   }
-  soundToggle.onchange = async () => {
-    const message = document.getElementById('heartbeat-error');
-    message.hidden = true;
-    if (!soundToggle.checked) {disableHeartbeat(); return;}
+  async function prepareAudio() {
     let context;
     try {
-      context = soundContext = new Audio();
-      context.onstatechange = () => syncHeartbeat();
-      const [,buffer] = await Promise.all([context.resume(),loadHeartbeat(context)]);
-      if (context!==soundContext) return;
-      heartbeat = buffer;
+      context = soundContext || (soundContext = new Audio());
+      context.onstatechange = () => { updateSoundControls(); syncHeartbeat(); };
+      const resumed = context.state==='running' ? undefined : context.resume();
+      // Unlock on the join/start gesture, even if the timed activity state is still arriving.
+      if (!soundSetting.hidden) bufferLoad ??= loadHeartbeat(context);
+      updateSoundControls();
+      const [,buffer] = await Promise.all([resumed,bufferLoad]);
+      if (context!==soundContext) return false;
+      if (buffer) heartbeat = buffer;
+      updateSoundControls();
       syncHeartbeat();
+      return !!heartbeat && context.state==='running';
     } catch {
-      if (context && context!==soundContext) return;
-      disableHeartbeat();
-      message.textContent = '無法播放心跳聲，可重新勾選再試。';
-      message.hidden = false;
+      if (context && context!==soundContext) return false;
+      closeAudio();
+      soundFailed = true;
+      updateSoundControls();
+      return false;
     }
+  }
+  function unlockOnInteraction(event) {
+    if (!Audio || !event.isTrusted || event.target.closest?.('#heartbeat-setting label, #heartbeat-preview') || !soundToggle.checked || soundFailed) return;
+    if (soundContext?.state!=='running') prepareAudio();
+  }
+  document.addEventListener('click',unlockOnInteraction,true);
+  document.addEventListener('keydown',unlockOnInteraction,true);
+  soundToggle.onchange = () => {
+    try { localStorage.setItem(soundPreference,soundToggle.checked?'on':'muted'); } catch { /* Applies in this tab. */ }
+    soundFailed = false;
+    if (soundToggle.checked) prepareAudio();
+    else closeAudio();
+    updateSoundControls();
+  };
+  previewButton.onclick = async () => {
+    stopPreview();
+    const request = previewRequest;
+    const atDeadline = countdownKey && answerEndsAt-performance.now()<=3000;
+    soundFailed = false;
+    if (!await prepareAudio() || atDeadline || request!==previewRequest || document.hidden || soundSetting.hidden || playing) return;
+    const source = soundContext.createBufferSource();
+    preview = source;
+    source.buffer = heartbeat;
+    source.connect(soundContext.destination);
+    source.onended = () => {
+      if (preview===source) { source.disconnect(); preview = null; }
+    };
+    source.start(0,0,0.65);
   };
   function pauseCountdown() {
     clearTimeout(countdownTimer);
+    stopPreview();
     stopHeartbeat();
   }
   function tickCountdown() {
     clearTimeout(countdownTimer);
-    if (!countdownKey || document.hidden) {stopHeartbeat(); return;}
+    if (document.hidden) {pauseCountdown(); return;}
+    if (!countdownKey) {stopHeartbeat(); return;}
     const ms = Math.max(0,answerEndsAt-performance.now());
     const seconds = Math.ceil(ms/1000);
     $('countdown').textContent = `剩餘 ${seconds} 秒 · 到期自動${expiryAction}`;
@@ -80,7 +138,13 @@ const classroomMotion = (() => {
     const timed = state.settings.duration_seconds>0;
     const sequential = state.settings.mode==='sequential';
     const {deadline,round_index,round_open} = state.round;
-    $('heartbeat-setting').hidden = !Audio || state.role!=='student' || !timed || state.phase==='results';
+    const hideSound = !Audio || !timed || state.phase==='results';
+    if (hideSound!==soundSetting.hidden) {
+      soundSetting.hidden = hideSound;
+      if (hideSound) stopPreview();
+      else if (soundToggle.checked && !soundFailed) prepareAudio();
+      updateSoundControls();
+    }
     const active = timed && state.phase==='active' && Number.isFinite(deadline) && (!sequential || round_open);
     $('countdown').hidden = !active;
     const key = active ? `${state.id}/${round_index}/${deadline}` : '';
@@ -107,8 +171,8 @@ const classroomMotion = (() => {
     countdownKey = '';
     pauseCountdown();
     $('countdown').hidden = true;
-    disableHeartbeat();
-    $('heartbeat-error').hidden = true;
+    soundSetting.hidden = true;
+    soundFailed = false;
     podiumObserver?.disconnect();
     podiumObserver = null;
     podiumPlayed = false;
@@ -168,8 +232,8 @@ const classroomMotion = (() => {
     const stage = el('div',undefined,'review-stage');
     stage.dataset.effect = ticket.effect;
     stage.setAttribute('role','status');
-    stage.append(el('span',ticket.caption,'review-caption'),
-                 el('strong',ticket.message,ticket.effect==='stamp'?'verdict-stamp':'review-outcome'));
+    stage.append(el('span',ticket.caption,'review-caption'));
+    if (ticket.message) stage.append(el('strong',ticket.message,ticket.effect==='stamp'?'verdict-stamp':'review-outcome'));
     node.append(stage);
     if (ticket.batch) {
       const undo = el('button','復原這筆判定','text-button review-revert');
@@ -186,6 +250,9 @@ const classroomMotion = (() => {
     const cell = $('monitor-table').querySelector(`[data-answer-id="${ticket.answer.id}"]`);
     if (cell && current?.role==='teacher') {
       cell.append(node);
+      if (ticket.effect==='erase' && node.getClientRects().length) {
+        node.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});
+      }
       playReview(ticket);
       if (keyboard && document.activeElement===document.body && cell.getClientRects().length) {
         const next = node.querySelector('.review-revert') || cell.querySelector('.review-controls button:enabled');
@@ -197,11 +264,12 @@ const classroomMotion = (() => {
     const session = generation, order = ++sequence;
     const result = await api(`/api/activities/${activity}/review`,{answer_id:answer.id,verdict,revision:answer.review_revision});
     const next = result.candidate;
-    const caption = result.displaced ? `${answer.group_name} 判錯` : '單筆批改';
-    const message = result.displaced ? (next ? `遞補：${next.group_name} · ${verdictNames[next.verdict]}` : '沒有其他候選答案')
-                                    : verdict==='correct'?'正解':'已判錯';
+    const incorrect = verdict==='incorrect';
+    const caption = incorrect ? `${answer.group_name} 判錯` : '單筆批改';
+    let message = incorrect ? '' : '正解';
+    if (result.displaced) message = next ? `遞補：${next.group_name} · ${verdictNames[next.verdict]}` : '沒有其他候選答案';
     await present({activity,answer,batch:result.batch_id,revision:answer.review_revision+1,caption,message,
-      effect:result.displaced?'erase':verdict==='correct'?'stamp':''},order,session,keyboard);
+      effect:incorrect?'erase':'stamp'},order,session,keyboard);
   }
   function stopPriority() {
     clearTimeout(priorityTimer);

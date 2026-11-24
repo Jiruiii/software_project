@@ -37,6 +37,7 @@ async page => {
     await tab.goto(classroom);
     await tab.waitForFunction(() => current?.phase === 'preparing');
   }
+  await page.addInitScript(observeAudio);
   await openRoom(page, fixture.teacher);
   const enable = page.getByRole('checkbox',{name:'讓低分組先答 3 秒'});
   const source = page.getByLabel('參考哪一場活動的成績？');
@@ -86,7 +87,20 @@ async page => {
   function observeAudio() {
     const prototype=AudioBufferSourceNode.prototype;
     const start=prototype.start, stop=prototype.stop;
-    window.heartbeats={starts:[],stops:0,decoded:0};
+    const outputs=new WeakMap(), countdownSources=new WeakSet(), connect=AudioNode.prototype.connect;
+    AudioNode.prototype.connect=function(destination,...args) {
+      if (!(this instanceof AudioBufferSourceNode) || destination!==this.context.destination) {
+        return connect.call(this,destination,...args);
+      }
+      const meter=this.context.createAnalyser();
+      meter.fftSize=1024;
+      meter.smoothingTimeConstant=0;
+      connect.call(this,meter,...args);
+      connect.call(meter,destination);
+      outputs.set(this,meter);
+      return destination;
+    };
+    window.heartbeats={starts:[],previews:[],stops:0,decoded:0};
     const decode=AudioContext.prototype.decodeAudioData;
     AudioContext.prototype.decodeAudioData=async function(...args) {
       const buffer=await decode.apply(this,args);
@@ -95,10 +109,30 @@ async page => {
     };
     prototype.start=function(when,offset=0,...rest) {
       const result=start.call(this,when,offset,...rest);
-      heartbeats.starts.push({offset,duration:this.buffer.duration,countdown:document.getElementById('countdown').textContent});
+      const record={offset,duration:this.buffer.duration,countdown:document.getElementById('countdown').textContent,
+        peak:[0,0,0],midDb:[-100,-100,-100]};
+      (rest.length ? heartbeats.previews : heartbeats.starts).push(record);
+      if (!rest.length) countdownSources.add(this);
+      const context=this.context, playedAt=context.currentTime;
+      const meter=outputs.get(this);
+      if (!meter) throw Error('心跳音源未接上分頁輸出');
+      const samples=new Float32Array(meter.fftSize), bins=new Float32Array(meter.frequencyBinCount);
+      const timer=setInterval(()=>{
+        const second=Math.floor(context.currentTime-playedAt+offset);
+        if (second<0 || second>=3) return;
+        meter.getFloatTimeDomainData(samples);
+        meter.getFloatFrequencyData(bins);
+        for(const s of samples) record.peak[second]=Math.max(record.peak[second],Math.abs(s));
+        const hz=context.sampleRate/meter.fftSize;
+        for(let i=Math.ceil(250/hz);i<=Math.floor(750/hz);i++) record.midDb[second]=Math.max(record.midDb[second],bins[i]);
+      },15);
+      this.addEventListener('ended',()=>{clearInterval(timer);meter.disconnect();},{once:true});
       return result;
     };
-    prototype.stop=function(...args) {heartbeats.stops++;return stop.apply(this,args);};
+    prototype.stop=function(...args) {
+      if (countdownSources.has(this)) heartbeats.stops++;
+      return stop.apply(this,args);
+    };
   }
   try {
     await Promise.all([low.addInitScript(observeAudio),high.addInitScript(observeAudio)]);
@@ -107,8 +141,15 @@ async page => {
     await page.locator('#quiz-duration').fill('11');
     await page.locator('#save-settings').click();
     await Promise.all([sound(low).waitFor(),sound(high).waitFor()]);
-    if(await sound(page).count() || await sound(low).isChecked() || await sound(high).isChecked()) throw Error('心跳聲應只在學生端選用，預設關閉');
-    await sound(low).check();
+    for(const tab of [page,low,high]) {
+      if(!await sound(tab).isVisible() || !await sound(tab).isChecked()) throw Error('限時活動應向師生預設開啟倒數聲');
+    }
+    await low.getByRole('button',{name:'試聽心跳聲'}).click();
+    await low.waitForFunction(()=>heartbeats.previews[0]?.peak[0]>.18 && heartbeats.previews[0].midDb[0]>-43);
+    await sound(high).uncheck();
+    await high.reload();
+    await sound(high).waitFor();
+    if(await sound(high).isChecked()) throw Error('重新載入後沒有保留靜音');
     await page.locator('#start').click();
     await Promise.all([
       low.waitForFunction(() => document.querySelector('#round-status').textContent.includes('本組可先答') && !document.querySelector('.question-card button').disabled),
@@ -131,15 +172,24 @@ async page => {
     await high.waitForFunction(()=>heartbeats.starts.length===1);
     const late=await high.evaluate(()=>heartbeats.starts[0]);
     if(late.offset<=0 || late.offset>=3 || !/剩餘 [1-3] 秒/.test(late.countdown)) throw Error('中途開啟應只播放剩餘部分');
-    for(const tab of [low,high]) {
-      await tab.waitForFunction(()=>heartbeats.stops===1);
+    await high.getByRole('button',{name:'試聽心跳聲'}).click();
+    if(await high.evaluate(()=>heartbeats.previews.length)) throw Error('試聽與真正倒數重疊');
+    for(const tab of [page,low,high]) {
+      await tab.waitForFunction(()=>heartbeats.stops>=1);
       if(await tab.evaluate(()=>heartbeats.starts.length!==1)) throw Error('更新狀態時重播了倒數');
+    }
+    for(const tab of [page,low]) {
+      if(!await tab.evaluate(()=>heartbeats.starts[0].peak.every(v=>v>.18) && heartbeats.starts[0].midDb.every(v=>v>-43)))
+        throw Error('師生的實際輸出在最後三秒應每秒都有可辨識的心跳');
     }
     await low.waitForFunction(()=>current.phase==='results');
     await verifyAudioLifecycle(low);
     await verifySequentialCountdown(low);
+    const output=await page.evaluate(()=>heartbeats.starts[0]);
     return {passed:true, sourceSaved:true, bothStudentStates:true, submittedAfterWindow:true,
-      answerDeadline:true,sequentialCountdown:true,lateEnable:true,mute:true,background:true,loadFailure:true};
+      answerDeadline:true,sequentialCountdown:true,teacherAndStudentSignal:true,previewSignal:true,
+      teacherPeakBySecond:output.peak.map(v=>Number(v.toFixed(2))),
+      savedMute:true,lateEnable:true,mute:true,background:true,loadFailure:true};
   } finally {
     await Promise.all([low.close(), high.close()]);
   }
@@ -156,7 +206,7 @@ async page => {
     await post(teacher,path+'/settings',{mode:'sequential',duration_seconds:6,fairness:false});
     const student=await post('student','/api/account/student-room',{course:fixture.low.course,aid:activity.id});
     await openRoom(tab,student,activity.id);
-    await sound(tab).check();
+    await tab.locator('#content-title').click();
     await post(teacher,path+'/start');
     await tab.waitForFunction(()=>heartbeats.starts.length===1);
     await post(teacher,path+'/round',{action:'close'});
@@ -199,8 +249,8 @@ async page => {
     await tab.waitForFunction(()=>heartbeats.stops===3);
     await tab.route('**/priority-heartbeat.wav',route=>route.fulfill({status:503,body:''}));
     await sound(tab).check();
-    await tab.locator('#heartbeat-error').waitFor();
-    if(await sound(tab).isChecked()) throw Error('載入失敗時開關沒有回復');
+    await tab.getByText('音效載入失敗，請按「試聽心跳聲」重試。').waitFor();
+    if(!await sound(tab).isChecked()) throw Error('載入失敗不應覆寫音效偏好');
     await tab.unroute('**/priority-heartbeat.wav');
     await tab.evaluate(()=>showCountdown(0));
     let deliver;
@@ -208,7 +258,7 @@ async page => {
     await tab.route('**/priority-heartbeat.wav',async route=>{await hold;await route.fallback();});
     const decoded=await tab.evaluate(()=>heartbeats.decoded);
     const request=tab.waitForRequest('**/priority-heartbeat.wav');
-    await sound(tab).check();
+    await tab.getByRole('button',{name:'試聽心跳聲'}).click();
     await request;
     await tab.evaluate(()=>{showCountdown(1.8,true);showCountdown(0);});
     deliver();
@@ -217,6 +267,7 @@ async page => {
     await tab.evaluate(()=>showCountdown(2.5,true));
     await tab.waitForFunction(()=>heartbeats.starts.length===4);
     await tab.evaluate(()=>classroomMotion.reset());
-    if(await tab.evaluate(()=>heartbeats.stops!==4 || document.getElementById('heartbeat-enabled').checked)) throw Error('離開活動後未重設心跳');
+    if(await tab.evaluate(()=>heartbeats.stops!==4 || !document.getElementById('heartbeat-setting').hidden ||
+        !document.getElementById('heartbeat-enabled').checked)) throw Error('離開活動後應停止心跳並保留偏好');
   }
 }
