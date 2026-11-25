@@ -187,7 +187,7 @@ class ExtraTests(unittest.TestCase):
         self.assertEqual(winners[0]['winner']['group_name'],winners[1]['winner']['group_name'])
         source,written=self.s.export_context(self.t,aid)
         self.assertEqual(f"{before[2]['text']}（{before[2]['group_name']}）",written['1.1'])
-        self.assertEqual(f"{before[1]['text']}（{before[1]['group_name']}）",written['1.2'])
+        self.assertEqual(f"{before[3]['text']}（{before[3]['group_name']}）",written['1.2'])
         def published():
             return self.s.snapshot(students[0],aid)['results'][:2]
         for answer in before[2:4]:

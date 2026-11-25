@@ -107,7 +107,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual('external',self.value())
         self.assertIn('pending_export',self.s.export_context(self.t,self.aid)[0])
 
-    def test_grouped_recovery_replaces_only_the_incorrect_child(self):
+    def test_grouped_recovery_replaces_the_entire_submission(self):
         from guided_notes import from_xlsx
         from test_guided_notes import payload
         self.g.data=payload(from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0])
@@ -118,7 +118,7 @@ class RecoveryTests(unittest.TestCase):
         self.s.submit_unit(v,self.aid,'1',{'1.1':'second','1.2':'b child'})
         self.s.transition(self.t,self.aid,'results');self.fail_after_write(answer_col=7);self.regrade();self.f.export(self.t,self.aid)
         grid=from_google(self.g.data)[0]
-        self.assertEqual(['second（B）','a child（A）'],[grid.value(4,7),grid.value(5,7)])
+        self.assertEqual(['second（B）','b child（B）'],[grid.value(4,7),grid.value(5,7)])
         self.assertEqual({'pending_answers':3,'complete':False},self.s.snapshot(u,self.aid)['grading'])
         for answer in self.s.snapshot(self.t,self.aid)['answers']:
             if answer['verdict']=='pending': self.s.review(self.t,self.aid,answer['id'],'correct')

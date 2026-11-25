@@ -28,7 +28,7 @@ Azure 部署與既有課堂資料搬移請參閱 [Azure 部署指南](docs/azure
 
 UI 使用專案內的 [Hallmark 設計工具](skills/hallmark/SKILL.md)。在專案根目錄執行 `node skills/hallmark/scripts/sloplint.mjs public --scope app` 可檢查版面與互動樣式；實際師生操作另由瀏覽器測試驗證。
 
-已歸檔功能的規則收在 [OpenSpec 主規格](openspec/specs/)。管理員授權、教師建課、學生建組、搶答與回查紀錄已用實際帳號測過；真實助教帳號共同批改仍待驗收。[帳號整合驗收紀錄](openspec/changes/firebase-course-accounts/tasks.md)
+已歸檔功能的規則收在 [OpenSpec 主規格](openspec/specs/)。管理員授權、教師建課、助教共同批改、學生建組、搶答與回查紀錄已用實際帳號驗收。[帳號整合驗收紀錄](openspec/changes/archive/2026-11-25-firebase-course-accounts/tasks.md)
 
 全題模式預設所有組別同時開始。授課老師可在活動設定選擇同課程已結束的場次，讓兩場都有參加且前場總分並列最低的小組先答三秒。[跨場保底規則](docs/account-priority-backlog.md)
 

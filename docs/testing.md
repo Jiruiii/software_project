@@ -46,4 +46,4 @@ python tests/run_live_sheets.py
 
 2026-11-22 發布前重新執行完整單元測試，127 項通過；`courses` 瀏覽器流程使用離線身分通過。OpenSpec 嚴格驗證通過 8 份主規格與 1 個進行中的變更。
 
-歷史測試資料保存在 [驗收證據目錄](evidence/README.md)。近期排行榜、學生公用頻道、可複製代碼的測試結果記在各自的 [OpenSpec 歸檔](../openspec/changes/archive/)。Firebase 真實帳號驗收的進度請見[帳號整合任務](../openspec/changes/firebase-course-accounts/tasks.md)。
+歷史測試資料保存在 [驗收證據目錄](evidence/README.md)。近期排行榜、學生公用頻道、可複製代碼的測試結果記在各自的 [OpenSpec 歸檔](../openspec/changes/archive/)。Firebase 真實帳號驗收請見[帳號整合驗收紀錄](../openspec/changes/archive/2026-11-25-firebase-course-accounts/tasks.md)。

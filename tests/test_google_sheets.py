@@ -93,9 +93,14 @@ class SheetsWorkflowTests(unittest.TestCase):
         imported=self.imported()
         self.assertEqual(['1.1','1.2'],self.service.snapshot(self.teacher,imported['id'])['units'][0]['questions'])
         answer = self.service.snapshot(self.teacher,aid)['answers'][0]
-        self.service.review(self.teacher,aid,answer['id'],'incorrect')
+        batch = self.service.review_batch(
+            self.teacher, aid, '1.1', [{'id': answer['id'], 'revision': 0}], 'incorrect'
+        )
         self.flow.export(self.teacher,aid)
-        self.assertEqual({**grid.cells, (5,7):'second（group）'}, from_google(self.google.data)[0].cells)
+        self.assertEqual(grid.cells, from_google(self.google.data)[0].cells)
+        self.service.undo_review_batch(self.teacher, aid, batch['batch_id'])
+        self.flow.export(self.teacher, aid)
+        self.assertEqual(after.cells, from_google(self.google.data)[0].cells)
 
     def test_legacy_group_export_stops_before_recovering_or_writing_labels(self):
         grid = from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]

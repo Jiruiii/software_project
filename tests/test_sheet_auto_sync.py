@@ -188,7 +188,7 @@ class AutoSyncTests(unittest.TestCase):
         self.s.transition(self.t, second['id'], 'results'); self.auto.run_once()
         self.assertEqual('all mode（C）', self.value())
 
-    def test_grouped_round_syncs_only_the_reviewed_child(self):
+    def test_grouped_round_sync_replaces_the_entire_submission(self):
         grid = from_xlsx((Path(__file__).parent/'fixtures/grouped.xlsx').read_bytes())[0]
         self.g.data = payload(grid)
         source = parse_grid(grid); source['spreadsheet_id'] = 'test-grouped-auto-id-12345'
@@ -210,22 +210,18 @@ class AutoSyncTests(unittest.TestCase):
         check_cells('a1（first）', 'a2（first）')
         self.s.review(self.t, aid, answers['first','1.1']['id'], 'incorrect')
         self.auto.run_once()
-        check_cells('b1（second）', 'a2（first）')
+        check_cells('b1（second）', 'b2（second）')
         writes = self.g.writes[-1][1]['requests']
-        self.assertEqual([(targets['1.1']['row'], targets['1.1']['col'])],
+        self.assertEqual([(targets[q]['row'], targets[q]['col']) for q in ('1.1', '1.2')],
                          [(w['updateCells']['start']['rowIndex'], w['updateCells']['start']['columnIndex']) for w in writes])
 
-        # Each group now has one incorrect child, but each cell still has a candidate.
-        self.s.review(self.t, aid, answers['second','1.2']['id'], 'incorrect')
+        last = answers['second','1.2']
+        batch = self.s.review_batch(self.t, aid, '1.2', [{'id':last['id'], 'revision':last['review_revision']}], 'incorrect')
         self.auto.run_once()
-        check_cells('b1（second）', 'a2（first）')
-        last = answers['second','1.1']
-        batch = self.s.review_batch(self.t, aid, '1.1', [{'id':last['id'], 'revision':last['review_revision']}], 'incorrect')
-        self.auto.run_once()
-        check_cells(targets['1.1']['original'], 'a2（first）')
+        check_cells(targets['1.1']['original'], targets['1.2']['original'])
         self.s.undo_review_batch(self.t, aid, batch['batch_id'])
         self.auto.run_once()
-        check_cells('b1（second）', 'a2（first）')
+        check_cells('b1（second）', 'b2（second）')
         self.s.review(self.t, aid, answers['first','1.1']['id'], 'correct')
         self.auto.run_once()
         check_cells('a1（first）', 'a2（first）')
