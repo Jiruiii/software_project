@@ -1,28 +1,23 @@
 schema: spec-driven
 
 context: |
-  Language: zh-TW
-  All artifacts must be written in zh-TW.
-  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+  專案
+  課堂搶答系統以課程管理師生身分與小組。教師建立活動、設定題型及批改，學生以小組作答、下注並查看成績。活動支援簡答、單選、多選及題組，可從 Google Sheets 匯入學習單並將答案寫回原格。
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always state what is out of scope
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  技術堆疊
+  - 後端使用 Python 3.11 以上、標準函式庫的 ThreadingHTTPServer 與 SQLite，入口為 app.py。
+  - 前端位於 public/，使用 HTML、CSS 與原生 JavaScript，由同一後端提供靜態檔案和 API。
+  - Google 登入使用 Firebase Authentication。Google Sheets API 負責讀寫學習單，Drive API 用於查驗雲端共用權限。本機寫回使用教師授權，Azure 模式使用伺服器服務帳戶。
+  - Windows 本機由 start-classroom.cmd 啟動。Azure 正式環境使用 Linux VM、Caddy HTTPS 反向代理、systemd 與持久化 SQLite，並以 GitHub main 為自動部署來源。
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  開發與驗收慣例
+  - 依 AGENTS.md 採用 OpenSpec。新功能、錯誤修復與行為變更先建立或更新對應的 change，確認 proposal、specs、design、tasks 足以指導實作。延續既有變更時沿用原 change。
+  - 文件使用繁體中文，保留 OpenSpec 結構標題與 SHALL/MUST 關鍵字的英文。
+  - 後端回歸使用 python -m unittest discover -s tests -v。涉及師生操作時，依 docs/testing.md 選擇相應的瀏覽器測試，使用隔離資料庫及測試身分。真實 Sheets 驗收使用測試副本。
+  - 實作時同步維護任務進度，記錄實際測試與驗收證據。完成 OpenSpec verify 與必要驗收後，再同步主規格並歸檔。
+
+rules:
+  specs:
+    - 以可觀察的行為撰寫需求與情境，將實作細節放在 design。
+  tasks:
+    - 驗收紀錄須區分本機或模擬測試與正式環境驗收。依實際證據勾選已完成項目。

@@ -410,14 +410,11 @@ class ExtraFeatures:
     def _sheet_answers(self, activity):
         aid = activity['id']
         answers = {}
-        for questions, submissions in self._complete_submissions_by_unit(aid):
-            if not self._reviewable(activity, questions[0]):
+        for questions, leader in self._leading_submissions(aid):
+            if leader is None or not self._reviewable(activity, questions[0]):
                 continue
-            for submission in submissions:
-                for row in submission:
-                    q = row['question_id']
-                    if q not in answers and row['verdict'] != 'incorrect':
-                        answers[q] = f"{row['text']}（{row['group_name']}）"
+            for row in leader:
+                answers[row['question_id']] = f"{row['text']}（{row['group_name']}）"
         for row in self.db.execute('SELECT question_id,reference_answer FROM question_meta WHERE activity_id=? AND reference_override=1', (aid,)):
             if row['reference_answer'] and self._reviewable(activity,row['question_id']):
                 answers[row['question_id']] = f"{row['reference_answer']}（老師答案）"
