@@ -104,13 +104,16 @@ class ExtraTests(unittest.TestCase):
 
     def test_e05_review_replacement_reversal_and_permissions(self):
         self.s.transition(self.t, self.aid, "active")
-        first = self.s.submit(self.u, self.aid, "1", "first", 3)
+        self.s.submit(self.u, self.aid, "1", "first", 3)
         self.s.submit(self.v, self.aid, "1", "second", 2)
         ids = [a["id"] for a in self.s.snapshot(self.t, self.aid)["answers"]]
         with self.assertRaises(QuizError): self.s.review(self.t, self.aid, ids[0], "incorrect")
         self.s.transition(self.t, self.aid, "results")
         with self.assertRaises(QuizError): self.s.review(self.u, self.aid, ids[0], "incorrect")
         with self.assertRaises(QuizError): self.s.review(self.t, self.aid, ids[0], "invalid")
+        self.s.review(self.t, self.aid, ids[1], "correct")
+        waiting = self.s.snapshot(self.u, self.aid)["results"][0]
+        self.assertEqual({"question_id":"1", "winner":None, "status":"pending"}, waiting)
         self.s.review(self.t, self.aid, ids[0], "incorrect")
         self.assertEqual("B", self.s.snapshot(self.u, self.aid)["results"][0]["winner"]["group_name"])
         self.s.review(self.t, self.aid, ids[1], "incorrect")
@@ -119,9 +122,7 @@ class ExtraTests(unittest.TestCase):
         for verdict in ("correct", "correct"):
             self.s.review(self.t, self.aid, ids[0], verdict)
             winner = self.s.snapshot(self.u, self.aid)["results"][0]["winner"]
-            self.assertEqual("A", winner["group_name"])
-            self.assertEqual(first["received_at"], winner["received_at"])
-            self.assertEqual("first", winner["text"])
+            self.assertEqual({"group_name":"A"}, winner)
 
     def test_e06_clusters_unicode_similarity_and_isolation(self):
         self.s.transition(self.t, self.aid, "active")
@@ -187,6 +188,17 @@ class ExtraTests(unittest.TestCase):
         source,written=self.s.export_context(self.t,aid)
         self.assertEqual(f"{before[2]['text']}（{before[2]['group_name']}）",written['1.1'])
         self.assertEqual(f"{before[1]['text']}（{before[1]['group_name']}）",written['1.2'])
+        def published():
+            return self.s.snapshot(students[0],aid)['results'][:2]
+        for answer in before[2:4]:
+            self.s.review(self.t,aid,answer['id'],'correct')
+        self.assertEqual([{'group_name':before[2]['group_name']}] * 2, [r['winner'] for r in published()])
+        restored=self.s.review(self.t,aid,before[0]['id'],'correct')
+        self.assertEqual(['pending','pending'],[r['status'] for r in published()])
+        self.s.review(self.t,aid,before[1]['id'],'correct')
+        self.assertEqual([{'group_name':before[0]['group_name']}] * 2, [r['winner'] for r in published()])
+        self.s.undo_review_batch(self.t,aid,restored['batch_id'])
+        self.assertEqual([{'group_name':before[2]['group_name']}] * 2, [r['winner'] for r in published()])
 
     def test_e10_scores_ties_negative_and_regrade(self):
         self.s.join(self.a['code'],'C')

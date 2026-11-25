@@ -389,6 +389,26 @@ async function course(c,task) {
     summary.append(team);
   }
   summary.append(createShareCode('課程代碼',c.id));
+  if(data.role==='owner') {
+    const remove=node('button','刪除課程','text-button delete-link');
+    remove.type='button';
+    remove.onclick=async()=>{
+      const confirmed=await confirmDeletion(`刪除課程「${c.title}」？`,
+        '將永久刪除這門課的所有搶答活動、小組、作答紀錄與成績，無法復原。');
+      if(!confirmed || version!==pageVersion) return;
+      await run(remove,async()=>{
+        const user=auth.currentUser;
+        await api('delete-course',{course:c.id,confirmed:true});
+        if(auth.currentUser!==user || !home) return;
+        home.teaching=home.teaching.filter(item=>item.id!==c.id);
+        home.studying=home.studying.filter(item=>item.id!==c.id);
+        if(version===pageVersion) history.replaceState(null,'','#home');
+        draw();
+        status('已刪除課程「'+c.title+'」。');
+      });
+    };
+    summary.append(remove);
+  }
   if(!staff) button(summary,'退出小組',()=>leaveTeam(c,data.membership,version),'text-button');
   details.append(summary);
   const list=panel();

@@ -29,7 +29,8 @@ class SheetsAutoSync:
 
     def status(self, aid, state, message):
         with self.service.lock:
-            self.service.sheet_sync_states[aid] = {'state':state, 'message':message}
+            if self.service.db.execute('SELECT 1 FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone():
+                self.service.sheet_sync_states[aid] = {'state':state, 'message':message}
 
     def watch(self, token, aid, retry=False):
         owner = self.service.teacher_key(token)
@@ -69,6 +70,12 @@ class SheetsAutoSync:
         for aid, binding in bindings:
             if self.stop_event.is_set(): return
             try:
+                with self.service.lock:
+                    exists = self.service.db.execute('SELECT 1 FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone()
+                if not exists:
+                    with self.lock:
+                        self.bindings.pop(aid, None)
+                    continue
                 owner, token = binding['owner'], binding['token']
                 if not self.service.teacher_active(owner):
                     self.status(aid, 'needs_auth', '教師登入已失效，請重新登入並連線 Google。')
@@ -130,7 +137,7 @@ class SheetsAutoSync:
                 result = self.flow._export(course, aid)
                 with self.service.lock:
                     saved = self.service.db.execute("SELECT exported_at FROM sheet_sources WHERE activity_id=?", (aid,)).fetchone()
-                    if saved[0] is not None:
+                    if saved and saved[0] is not None:
                         self.status(aid, "synced", result["message"])
             except QuizError as exc:
                 if "判定已改變" in str(exc):

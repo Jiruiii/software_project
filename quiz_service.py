@@ -28,6 +28,7 @@ class QuizService(ExtraFeatures):
             raise ValueError("教師密碼不可空白")
         self.password_hash = hashlib.sha256(teacher_password.encode()).digest()
         self.lock = threading.RLock()
+        self.sheet_export_lock = threading.Lock()
         self.courses = None
         self.login_attempts = {}
         self.sheet_sync_states = {}
@@ -300,6 +301,32 @@ class QuizService(ExtraFeatures):
             raise QuizError(404, "找不到這個活動。")
         return row
 
+    def delete_activity(self, token, aid, confirmed):
+        with self.sheet_export_lock, self.lock:
+            self._auth(token, "teacher", aid)
+            if self.courses and self.courses.scope(token)["kind"] != "owner":
+                raise QuizError(403, "只有本課程的授課老師可以刪除搶答活動。")
+            self._activity(aid)
+            if confirmed is not True:
+                raise QuizError(400, "請先確認刪除搶答活動。")
+            with self.db:
+                self._delete_activity_records(aid)
+            self.sheet_sync_states.pop(aid, None)
+        return {"ok": True}
+
+    def _delete_activity_records(self, aid):
+        # The caller owns the transaction; a whole course must be removed atomically.
+        if self.courses:
+            for table in ("grade_log", "submitters"):
+                self.db.execute(f"DELETE FROM {table} WHERE answer IN (SELECT id FROM answers WHERE activity_id=?)", (aid,))
+            self.db.execute("DELETE FROM attendance WHERE aid=?", (aid,))
+            self.db.execute("DELETE FROM lessons WHERE aid=?", (aid,))
+        self.db.execute("UPDATE activity_options SET priority_source=NULL WHERE priority_source=?", (aid,))
+        for table in ("sessions", "chat_messages", "review_batches", "answers", "question_meta",
+                      "groups", "questions", "activity_options", "sheet_sources"):
+            self.db.execute(f"DELETE FROM {table} WHERE activity_id=?", (aid,))
+        self.db.execute("DELETE FROM activities WHERE id=?", (aid,))
+
     @expire_first
     def transition(self, token, aid, target):
         with self.lock, self.db:
@@ -420,10 +447,11 @@ class QuizService(ExtraFeatures):
                     for answer in activity["answers"]:
                         if answer["question_id"] in authors:
                             answer["submitted_by_me"] = authors[answer["question_id"]] == own_uid
-            if activity["phase"] == "results":
-                winners = {}
-                for r in self._winner_rows(aid).values():
-                    winners.setdefault(r["question_id"], {**self._own_answer(r), "group_name": r["group_name"]})
+            if activity["phase"] == "results" and session["role"] == "student":
+                activity["results"] = self._student_results(aid, activity["questions"])
+            elif activity["phase"] == "results":
+                winners = {q: {**self._own_answer(r), "group_name": r["group_name"]}
+                           for q, r in self._winner_rows(aid).items()}
                 answered={r['question_id'] for r in self.db.execute('SELECT DISTINCT question_id FROM answers WHERE activity_id=?',(aid,))}
                 activity["results"] = [{"question_id": q, "winner": winners.get(q), "has_answers":q in answered} for q in activity["questions"]]
             state = self._extra_snapshot(activity, session)

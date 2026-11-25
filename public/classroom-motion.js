@@ -319,7 +319,7 @@ const classroomMotion = (() => {
   function studentVerdicts(previous,state) {
     if(state.role!=='student' || previous?.id!==state.id || reduced.matches) return;
     const before=new Map(previous.answers.map(a=>[a.question_id,a.verdict]));
-    const changed=state.answers.filter(a=>a.verdict==='correct' && before.get(a.question_id)!=='correct');
+    const changed=state.answers.filter(a=>before.get(a.question_id)!==a.verdict);
     if(!changed.length) return;
     const questions=new Set(changed.map(a=>a.question_id));
     const entries=state.phase==='results'?$('report-table'):$('student-questions');

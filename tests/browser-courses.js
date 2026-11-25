@@ -217,6 +217,7 @@ async page => {
   await button('生物 · 甲組').click();
   await page.reload();
   await page.getByText(/本課程累計.*0 分/).waitFor();
+  if(await button('刪除課程').count()) throw Error('學生看到刪除課程入口');
   await checkCopy('課程代碼',code);
   await nav('課程排行榜');
   await page.getByRole('row',{name:/1.*甲組.*本組.*0/}).waitFor();
@@ -225,6 +226,7 @@ async page => {
   await button('生物 · 甲組').click();
   await page.getByRole('button',{name:/第一堂/}).click();
   await page.waitForFunction(()=>document.getElementById('role-badge')?.textContent==='甲組');
+  if(await page.locator('#delete-activity').isVisible()) throw Error('學生看到刪除活動入口');
   for(const width of [320,601,768,1024,1280]) {
     await page.setViewportSize({width,height:800});
     const fits=await page.locator('#session-code-block').evaluate(block=>{
@@ -371,14 +373,16 @@ async page => {
   await studentReport.goto(new URL('/#course/'+code,page.url()).href);
   await studentReport.getByRole('button',{name:/第一堂/}).click();
   const verdictCell=studentReport.locator('#report-table tr[data-question="1"] td').nth(1);
-  const studentStamp=verdictCell.locator('.student-stamp');
+  const correctStamp=verdictCell.locator('.student-stamp').filter({hasText:'正解'});
+  const incorrectStamp=verdictCell.locator('.student-stamp').filter({hasText:'錯誤'});
   await button('甲組 第 1 題判為正確').click();
-  await studentStamp.waitFor();
+  await correctStamp.waitFor();
   await button('甲組 第 1 題判為錯誤').click();
-  await verdictCell.getByText('錯誤',{exact:true}).waitFor();
-  await studentStamp.waitFor({state:'detached'});
+  await incorrectStamp.waitFor();
+  await correctStamp.waitFor({state:'detached'});
   await button('甲組 第 1 題判為正確').click();
-  await studentStamp.waitFor();
+  await correctStamp.waitFor();
+  await incorrectStamp.waitFor({state:'detached'});
   const history=page.locator('#monitor-table tr').filter({has:page.getByRole('rowheader',{name:'甲組',exact:true})}).locator('details');
   await history.locator('summary').click();
   await history.locator('summary').focus();
@@ -425,6 +429,8 @@ async page => {
   await roundLine.getByRole('button',{name:'開啟下一題'}).click();
   await page.waitForFunction(()=>current.round.unit_id==='2' && current.round.round_open);
   await page.setViewportSize({width:390,height:800});
+  await directory.waitFor();
+  await rail.waitFor({state:'hidden'});
   if(await rail.isVisible() || await rail.locator('#end').count()) throw Error('結束整場應在主畫面');
   await page.locator('#end').click();
   await page.keyboard.press('Escape');
@@ -442,6 +448,8 @@ async page => {
   await page.getByRole('heading',{name:'我的課程'}).waitFor();
   if(await rail.getByText('加入小組').count() || await rail.getByText('新增課程').count() || await rail.getByText('課程排行榜').count()) throw Error('助教首頁顯示錯誤角色');
   await button('生物 · 助教').click();
+  await page.locator('#workspace .share-code').waitFor();
+  if(await button('刪除課程').count()) throw Error('助教看到刪除課程入口');
   await page.evaluate(()=>{location.hash='course/'+location.hash.split('/')[1]+'/assistant';});
   await page.getByRole('heading',{name:'我的課程'}).waitFor();
   if(await page.getByLabel('助教的帳號 UID').count() || await rail.getByText('加入助教').count()) throw Error('出現未授權的課程工具');
@@ -451,11 +459,13 @@ async page => {
   await firstLesson.locator('.answer-record').getByText('正確',{exact:true}).waitFor();
   await firstLesson.getByRole('button',{name:'前往批改'}).click();
   if(await page.locator('#end').isVisible()) throw Error('助教可以結束整場');
+  if(await page.locator('#delete-activity').isVisible()) throw Error('助教看到刪除活動入口');
   await button('甲組 第 1 題判為錯誤').click();
-  await verdictCell.getByText('錯誤',{exact:true}).waitFor();
-  await studentStamp.waitFor({state:'detached'});
+  await incorrectStamp.waitFor();
+  await correctStamp.waitFor({state:'detached'});
   await button('甲組 第 1 題判為正確').click();
-  await studentStamp.waitFor();
+  await correctStamp.waitFor();
+  await incorrectStamp.waitFor({state:'detached'});
   await studentReport.close();
   await button('帳號選單').click();
   await page.locator('#work-menu').getByRole('button',{name:'登出 Google 帳號'}).click();
@@ -464,5 +474,32 @@ async page => {
   await nav('授予教師資格');
   await page.getByLabel('教師的帳號 UID').waitFor();
   if(await rail.getByText('將未歸屬活動加入課程').count()) throw Error('管理員仍有舊活動歸屬操作');
+  await button('帳號選單').click();
+  await page.locator('#work-menu').getByRole('button',{name:'登出 Google 帳號'}).click();
+  await page.evaluate(()=>{sessionStorage.fixture='teacher';});
+  await button('使用 Google 帳號登入').click();
+  await button('生物 · 授課教師').click();
+  await page.getByRole('button',{name:/第一堂/}).click();
+  const modal=page.getByRole('dialog');
+  await button('刪除搶答活動').click();
+  await modal.getByRole('heading',{name:'刪除搶答活動「第一堂」？'}).waitFor();
+  if(!await button('取消').evaluate(b=>b===document.activeElement)) throw Error('刪除時焦點應在取消');
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await button('刪除搶答活動').click();
+  await modal.getByRole('button',{name:'確認刪除'}).click();
+  await page.waitForURL('**/#course/'+code);
+  await button('刪除課程').waitFor();
+  if(await page.getByRole('button',{name:/第一堂/}).count()) throw Error('已刪搶答仍出現在活動清單');
+  await button('刪除課程').click();
+  await modal.getByRole('heading',{name:'刪除課程「生物」？'}).waitFor();
+  await modal.getByText(/所有搶答活動、小組、作答紀錄與成績/).waitFor();
+  await button('取消').click();
+  await page.reload();
+  await button('刪除課程').click();
+  await modal.screenshot({path:'output/playwright/delete-course-confirmation.png'});
+  await modal.getByRole('button',{name:'確認刪除'}).click();
+  await button('數學 · 授課教師').waitFor();
+  if(await button('生物 · 授課教師').count()) throw Error('已刪課程仍出現在首頁');
   return {passed:true, provider:'offline test fixture', loginRecovery:true, mobileTeacherActions:true, studentLeaveAndRejoin:true, roles:['student','teacher','assistant','admin']};
 }
