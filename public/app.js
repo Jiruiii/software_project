@@ -2,6 +2,7 @@
 const $ = (id) => document.getElementById(id);
 const phaseNames = {preparing: "準備中", active: "作答中", results: "結果"};
 const verdictNames = {pending:"待批改", withheld:"等待本題結束", correct:"正確", incorrect:"錯誤", unanswered:"未作答"};
+const studentStampLabels = {correct:"正解", incorrect:"錯誤"};
 let auth = null, activityId = null, current = null, generation = 0;
 let refreshPromise = null, connected = true, cardsKey = "", lastMonitor = "", lastResults = "", lastList = "";
 const pendingAnswers = new Set();
@@ -52,10 +53,13 @@ function connection(ok) {
 async function api(path, data, token = auth?.token) {
   const headers = {"Content-Type": "application/json"};
   if (token) headers.Authorization = "Bearer " + token;
+  const timeout = path.startsWith("/api/sheets/") || path.endsWith("/export") ? 45000 : 5000;
+  // A confirmed deletion may wait for an in-flight sheet export.
+  const signal = path.endsWith("/delete") ? undefined : AbortSignal.timeout(timeout);
   let response;
   try {
     response = await fetch(path, {method: data === undefined ? "GET" : "POST", headers,
-      body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.timeout(path.startsWith("/api/sheets/") || path.endsWith("/export") ? 45000 : 5000)});
+      body: data === undefined ? undefined : JSON.stringify(data), signal});
   } catch { throw Object.assign(new Error("暫時無法連線，請確認服務仍在執行。"), {network: true}); }
   let payload;
   try {payload=await response.json();}
@@ -147,6 +151,24 @@ $("create-form").onsubmit = (event) => {
 };
 $("logout").onclick = () => action($("logout"), async () => {await api("/api/logout", {}); saveAuth(null);});
 $("back").onclick = () => selectActivity(null);
+$('delete-activity').onclick = async () => {
+  if (!current || current.role !== 'teacher' || auth?.assistant) return;
+  const id=activityId, version=generation, title=current.title;
+  const confirmed=await confirmDeletion(`刪除搶答活動「${title}」？`,
+    '將永久刪除本場活動、所有作答、批改紀錄與成績，無法復原。'+(current.phase==='active'?'進行中的搶答會立即停止。':''));
+  if (!confirmed || generation!==version) return;
+  await action($('delete-activity'),async()=>{
+    await api(`/api/activities/${id}/delete`,{confirmed:true});
+    if(generation===version) leaveDeletedActivity();
+  });
+};
+function leaveDeletedActivity() {
+  if(auth?.course) location.replace('/#course/'+auth.course);
+  else {
+    selectActivity(null);
+    notice('這場搶答活動已移除。',true);
+  }
+}
 async function googleStatus() {
   const ownGeneration = generation;
   const status = await api("/api/google/status");
@@ -287,6 +309,19 @@ function renderList(items) {
     }
   }
 }
+function updateStudentStamp(stamp, verdict) {
+  const label = studentStampLabels[verdict];
+  stamp.hidden = !label;
+  if (label && stamp.dataset.verdict !== verdict) {
+    stamp.dataset.verdict = verdict;
+    stamp.textContent = label;
+  }
+}
+function createStudentStamp(verdict) {
+  const stamp = el('strong', undefined, 'verdict-stamp student-stamp');
+  updateStudentStamp(stamp, verdict);
+  return stamp;
+}
 function renderCards(state) {
   const key=JSON.stringify([state.id,state.units,state.question_settings]); if (cardsKey===key) return;
   cardsKey=key; $('student-questions').replaceChildren();
@@ -315,8 +350,7 @@ function renderCards(state) {
       const saved=el('p',undefined,'saved-answer'), time=el('p',undefined,'answer-time'); saved.hidden=time.hidden=true;
       const reference=el('aside',undefined,'published-reference'); reference.hidden=true;
       reference.append(el('strong','老師正確答案'),el('p',undefined,'reference-text'));
-      const stamp=el('strong','正解','verdict-stamp student-stamp'); stamp.hidden=true;
-      field.append(label,input,saved,stamp,time,reference); card.append(field);
+      field.append(label,input,saved,createStudentStamp(),time,reference); card.append(field);
     }
     const betting=state.question_settings[unit.questions[0]].betting_enabled;
     const label=el('label',betting?`信心下注（可不押${unit.questions.length>1?'，整題組計一次分':''}）`:'本題未開放下注'), stake=el('select'); stake.id=`stake-${i}`; label.htmlFor=stake.id; stake.className='stake';
@@ -398,7 +432,7 @@ function updateInputs() {
       const answer=answers.get(field.dataset.question), input=field.querySelector('.answer-input'); input.disabled=disabled; input.hidden=!!answer;
       const saved=field.querySelector('.saved-answer'), time=field.querySelector('.answer-time'); saved.hidden=time.hidden=!answer;
       if (answer) {input.value=answer.text; saved.textContent=answer.text; time.textContent=`已於 ${timeText(answer.received_at)} 送出 · ${answerElapsedText(answer)} · ${verdictNames[answer.verdict]} · ${answer.stake===0?'不押':`下注 ${answer.stake} 分`}`;}
-      field.querySelector('.student-stamp').hidden=answer?.verdict!=='correct';
+      updateStudentStamp(field.querySelector('.student-stamp'), answer?.verdict);
       if(answer?.points) time.textContent+=' · '+scoreParts(answer.points);
       const reference=field.querySelector('.published-reference'), text=current.references?.[field.dataset.question] || '';
       reference.hidden=!text; reference.querySelector('.reference-text').textContent=text;
@@ -492,13 +526,21 @@ function renderMonitor(state) {
     focused.focus({preventScroll:true});
 }
 function renderResults(state) {
-  const selected=state.role==='teacher'?$('monitor-question').value:'';
-  const key = JSON.stringify([state.results,selected]); if (lastResults === key) return; lastResults = key;
-  const list = el("div", undefined, "results-list");
+  const student=state.role==='student';
+  const selected=student?'':$('monitor-question').value;
+  const key = JSON.stringify([state.role,state.results,selected]); if (lastResults === key) return; lastResults = key;
+  const list = el("div", undefined, student ? "results-list student-results" : "results-list");
+  const studentStatus={pending:'待批改', incorrect:'無組答對', unanswered:'無人作答'};
   for (const result of state.results) {
     if(selected && result.question_id!==selected) continue;
-    const row = el("div", undefined, "result-row"), detail = el("div");
+    const row = el("div", undefined, "result-row");
+    list.append(row);
     row.append(el("span", `第 ${result.question_id} 題`, "result-number"));
+    if (student) {
+      row.append(el('span', result.winner?.group_name ?? studentStatus[result.status], 'winner'));
+      continue;
+    }
+    const detail = el("div");
     detail.append(el("div", result.winner ? `${result.winner.group_name} · 搶答成功（${verdictNames[result.winner.verdict]}）` : result.has_answers ? "無成功組別（候選已判錯）" : "無人作答", "winner"));
     if (result.winner) {
       const text=result.winner.text;
@@ -507,7 +549,7 @@ function renderResults(state) {
         const full=el('details',undefined,'full-answer'); full.append(el('summary','查看完整答案'),el('p',text,'result-answer')); detail.append(full);
       } else detail.append(el('p',text,'result-answer'));
     }
-    row.append(detail); list.append(row);
+    row.append(detail);
   }
   $("results").replaceChildren(list);
 }
@@ -650,6 +692,7 @@ function renderState(state,sequence) {
   $("teacher-controls").hidden = !teacher || state.phase!=="preparing" || !!auth?.assistant;
   $("start").hidden = state.phase !== "preparing";
   $("end").hidden = !teacher || !!auth?.assistant || state.phase !== "active";
+  $("delete-activity").hidden = !teacher || !!auth?.assistant;
   $("phase-label").textContent = phaseNames[state.phase]; $("phase-label").className = "phase-pill " + state.phase;
   if(ended) $('phase-label').textContent='作答結束';
   else if(state.phase==='active' && state.settings.mode==='sequential') {
@@ -662,7 +705,7 @@ function renderState(state,sequence) {
   }
   $("session-rule").textContent = teacher ? "每組每題以第一筆有效答案為準。作答中請勿向學生投影此頁，以免公開他組答案。" : "每題由小組共同送出一份答案。送出後不能修改；結果公布前看不到其他組別的作答。";
   $("content-title").textContent = ended ? "本次搶答成果" : teacher ? "小組作答狀況" : "本組作答區";
-  $("phase-help").textContent = ended ? "搶答成功代表最快且未判錯，請一併查看判定。" : state.phase === "preparing" ? "等待老師開始，作答區會自動開放。" : teacher ? "答案會自動更新。" : "每組送出一份答案，送出後不能修改。";
+  $("phase-help").textContent = ended ? "各題列出最先答對的小組，題組須所有子題都答對。" : state.phase === "preparing" ? "等待老師開始，作答區會自動開放。" : teacher ? "答案會自動更新。" : "每組送出一份答案，送出後不能修改。";
   $("student-questions").hidden = teacher || ended;
   $("teacher-monitor").hidden = !teacher;
   $("results").hidden = !ended;
@@ -774,6 +817,7 @@ async function refresh() {
     } catch (error) {
       if (ownGeneration !== generation) return;
       if (error.status === 401) {saveAuth(null); notice(error.message);}
+      else if (id && auth?.role==='teacher' && (error.status===403 || error.status===404)) leaveDeletedActivity();
       else {connection(false); updateInputs(); if (!error.network) notice(error.message);}
     }
   })();
@@ -856,7 +900,7 @@ function renderReport(state) {
       const row=el('tr'); row.dataset.question=r.question;
       row.append(el('td',r.question));
       const verdict=el('td',verdictNames[r.verdict]);
-      if(r.verdict==='correct') verdict.replaceChildren(el('strong','正解','verdict-stamp student-stamp'));
+      if(studentStampLabels[r.verdict]) verdict.replaceChildren(createStudentStamp(r.verdict));
       row.append(verdict,el('td',r.answer));
       for(const value of [r.stake??'—',r.wager??'—',r.speed??'—',r.points??'同題組',r.successful?'是':'否',r.reference||'老師尚未填寫']) row.append(el('td',value));
       table.append(row);

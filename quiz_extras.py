@@ -331,15 +331,31 @@ class ExtraFeatures:
             if complete:
                 yield questions, complete
 
+    def _leading_submissions(self, aid):
+        for questions, submissions in self._complete_submissions_by_unit(aid):
+            leader = next((answers for answers in submissions
+                           if all(a["verdict"] != "incorrect" for a in answers)), None)
+            yield questions, leader
+
     def _winner_rows(self, aid):
-        """Earliest complete unit not disqualified; one group wins every child."""
-        winners = {}
-        for _, submissions in self._complete_submissions_by_unit(aid):
-            for answers in submissions:
-                if all(a["verdict"] != "incorrect" for a in answers):
-                    winners.update({a["question_id"]: a for a in answers})
-                    break
-        return winners
+        """Teacher's current candidate for each question, including pending work."""
+        return {a["question_id"]: a for _, leader in self._leading_submissions(aid)
+                if leader for a in leader}
+
+    def _student_results(self, aid, questions):
+        rows = {q: {"question_id": q, "winner": None, "status": "unanswered"} for q in questions}
+        for children, leader in self._leading_submissions(aid):
+            winner = None
+            if leader is None:
+                status = "incorrect"
+            elif all(a["verdict"] == "correct" for a in leader):
+                status = "correct"
+                winner = {"group_name": leader[0]["group_name"]}
+            else:
+                status = "pending"
+            for q in children:
+                rows[q].update(winner=winner, status=status)
+        return list(rows.values())
 
     def _reviewable(self, activity, question):
         if activity["phase"] == "results": return True

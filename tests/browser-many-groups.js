@@ -113,9 +113,22 @@ async (page) => {
     check(rows.length===6,'result missing question');
     rows.forEach((row,i)=>{
       check(row.number===`第 ${expected[i].question} 題`,'result question mismatch');
-      check(row.group===`${expected[i].group} · 搶答成功（待批改）`,'result winner mismatch');
-      check(row.answer===expected[i].text,'result answer mismatch');
+      if(view===page) {
+        check(row.group===`${expected[i].group} · 搶答成功（待批改）`,'teacher candidate mismatch');
+        check(row.answer===expected[i].text,'teacher answer mismatch');
+      } else {
+        check(row.group==='待批改' && row.answer===undefined,'學生看到尚未確定的組別或答案');
+      }
     });
+  }
+  for(const leader of expected) {
+    const answer=active.answers.find(a=>a.question_id===leader.question && a.group_name===leader.group);
+    await api(path+'/review',{answer_id:answer.id,verdict:'correct'},teacher.token);
+  }
+  for(const student of students) {
+    const winners=student.page.locator('#results .winner');
+    await winners.last().filter({hasText:expected[5].group}).waitFor();
+    check((await winners.allTextContents()).every((name,i)=>name===expected[i].group),'學生結算的得主與最快答對小組不同');
   }
   await page.screenshot({path:'output/playwright/many-groups-teacher-results.png',fullPage:true});
   await students[0].page.setViewportSize({width:390,height:844});

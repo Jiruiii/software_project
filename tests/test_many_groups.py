@@ -97,7 +97,9 @@ class ManyGroupsTests(unittest.TestCase):
                 self.assertEqual(first["group_name"],row["winner"]["group_name"])
                 self.assertEqual(first["text"],row["winner"]["text"])
                 self.assertEqual(min(received[i,q]["received_at"] for i in range(30)),row["winner"]["received_at"])
-            for t in people: self.assertEqual(result,self.ok(path,token=t)["results"])
+                self.ok(path+"/review", {"answer_id":first["id"], "verdict":"correct"}, self.teacher)
+            confirmed = [{"question_id":r["question_id"], "status":"correct", "winner":{"group_name":r["winner"]["group_name"]}} for r in result]
+            for t in people: self.assertEqual(confirmed,self.ok(path,token=t)["results"])
             rounds.append({"round":round_no+1,"answers":180,"winners":[r["winner"]["group_name"] for r in result]})
         ordered = sorted(self.latencies)
         self.metrics.append({"scenario":"30 groups x 6 questions x 3 rounds", "answers":540,

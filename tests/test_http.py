@@ -57,8 +57,11 @@ class HttpTests(unittest.TestCase):
         _, state = self.request(path, token=teacher)
         self.assertEqual(2, len(state["answers"]))
         self.request(path + "/end", {}, teacher)
+        answer_id = state["answers"][0]["id"]
+        self.assertEqual(200, self.request(path + "/review", {"answer_id":answer_id,"verdict":"correct"}, teacher)[0])
         _, state = self.request(path, token=a["token"])
-        self.assertEqual("B", state["results"][0]["winner"]["group_name"])
+        self.assertEqual({"group_name":"B"}, state["results"][0]["winner"])
+        self.assertNotIn("first", json.dumps(state))
         self.assertIsNone(state["results"][1]["winner"])
         self.assertEqual(409, self.request(path + "/answers", {"question": "2", "answer": "late"}, a["token"])[0])
 

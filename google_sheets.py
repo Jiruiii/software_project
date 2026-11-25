@@ -230,7 +230,6 @@ class SheetsWorkflow:
         self.server_managed = getattr(self.google, "server_managed", False)
         self.previews = {}
         self.preview_lock = threading.Lock()
-        self.export_lock = threading.Lock()
 
     def sheet_identity(self, token, owner, aid=None):
         if not self.server_managed:
@@ -301,7 +300,7 @@ class SheetsWorkflow:
         return self._export(self.sheet_identity(token, owner, aid), aid)
 
     def _export(self, owner, aid):
-        with self.export_lock:
+        with self.service.sheet_export_lock:
             source, winners = self.service._sheet_export_context(aid)
             sid = source["spreadsheet_id"]
             if sid in PROTECTED_TEMPLATES:

@@ -97,7 +97,7 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                 return self.respond(200, (ROOT / "public" / "chalk-grain.png").read_bytes(), "image/png")
             if self.command == "GET" and path in ("/electronic-countdown.wav", "/priority-heartbeat.wav"):
                 return self.respond(200, (ROOT / "public" / path[1:]).read_bytes(), "audio/wav")
-            if self.command == "GET" and path in ("/workspace.js", "/activity-chat.js", "/share-code.js", "/classroom-motion.js", "/classroom-drafts.js"):
+            if self.command == "GET" and path in ("/workspace.js", "/activity-chat.js", "/share-code.js", "/classroom-motion.js", "/classroom-drafts.js", "/confirm-delete.js"):
                 return self.respond(200, (ROOT / "public" / path[1:]).read_bytes(), "text/javascript; charset=utf-8")
             if self.command == "GET" and path in ("/", "/app.js", "/style.css", "/google-setup.html"):
                 file, mime = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"), "/style.css": ("style.css", "text/css"), "/google-setup.html":("google-setup.html","text/html")}[path]
@@ -167,7 +167,7 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
                     return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|answers|export|sheet-sync|csv|settings|round|review|review-batch|review-undo|clusters|reference|report|bundle|question-settings|chat))?", path)
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|delete|answers|export|sheet-sync|csv|settings|round|review|review-batch|review-undo|clusters|reference|report|bundle|question-settings|chat))?", path)
             if match:
                 aid, action = match.groups()
                 if action == "chat":
@@ -176,6 +176,8 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                         return self.respond(200, service.chat_messages(token, aid, after))
                     if self.command == "POST":
                         return self.respond(200, service.post_chat(token, aid, data.get("body"), data.get("request_id")))
+                if self.command == 'POST' and action == 'delete':
+                    return self.respond(200, service.delete_activity(token, aid, data.get('confirmed')))
                 if self.command == 'POST' and action == 'question-settings':
                     return self.respond(200, service.question_settings(token, aid, data.get('unit'), data.get('betting_enabled'), data.get('questions')))
                 if self.command == "POST" and action == "bundle":

@@ -172,9 +172,10 @@ class Acceptance:
             self.http(prefix+'/bundle', {'unit':unit['id'],'answers':{q:'較晚答案' for q in unit['questions']}}, students[(i+1)%2])
             expected.update({q:f'{answer}（驗收組{i%2+1}）' for q,answer in answers.items()})
         self.http(prefix + "/end", {})
-        teacher = self.http(prefix)
+        expected_results = [{"question_id":q, "winner":None, "status":"pending" if q in expected else "unanswered"}
+                            for q in self.http(prefix)["questions"]]
         for student in students:
-            check(self.http(prefix, token=student)["results"] == teacher["results"], "Student and teacher results differ")
+            check(self.http(prefix, token=student)["results"] == expected_results, "Unexpected student results before grading")
         before = self.snapshot()
         exported = self.http(prefix + "/export", {})
         after = self.snapshot()

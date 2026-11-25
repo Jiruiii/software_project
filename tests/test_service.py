@@ -89,8 +89,12 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(2, len(teacher["answers"]))
         self.assertIn("received_at", teacher["answers"][0])
         self.s.transition(self.teacher, self.a["id"], "results")
-        result = self.s.snapshot(self.student, self.a["id"])["results"]
-        self.assertEqual("SECRET_GROUP", result[0]["winner"]["group_name"])
+        self.assertIsNone(self.s.snapshot(self.student, self.a["id"])["results"][0]["winner"])
+        self.s.review(self.teacher, self.a["id"], teacher["answers"][0]["id"], "correct")
+        published = self.s.snapshot(self.student, self.a["id"])
+        self.assertNotIn("SECRET_ANSWER", json.dumps(published))
+        result = published["results"]
+        self.assertEqual({"group_name": "SECRET_GROUP"}, result[0]["winner"])
         self.assertIsNone(result[2]["winner"])
 
     def test_f14_concurrent_groups_and_same_group(self):
@@ -103,6 +107,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(21, len(teacher["answers"]))
         first = teacher["answers"][0]
         self.s.transition(self.teacher, self.a["id"], "results")
+        self.s.review(self.teacher, self.a["id"], first["id"], "correct")
         result = self.s.snapshot(self.student, self.a["id"])["results"]
         self.assertEqual(first["group_name"], result[0]["winner"]["group_name"])
 

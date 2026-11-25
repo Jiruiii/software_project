@@ -82,12 +82,17 @@ async (page) => {
   const ended = await page.evaluate(() => window.qaEndClick);
   const endSyncMs = Math.max(...await Promise.all([studentA,studentB,groupmate].map(p => p.evaluate(() => window.qaPhaseTimes.end)))) - ended;
   check(endSyncMs <= 2000, `F-15: end sync ${endSyncMs}ms exceeded 2 seconds`);
+  await page.locator('#teacher-tabs [data-view="monitor"]').click();
+  await page.locator('#monitor-question').selectOption('1');
+  await page.getByRole('button',{name:'第 1 組 第 1 題判為正確',exact:true}).click();
   for (const student of [studentA,studentB]) {
     const results = student.locator('#results');
-    check((await results.innerText()).includes('第 1 組 · 搶答成功'), 'F-14: wrong winner');
+    await results.locator('.winner').first().filter({hasText:/^第 1 組$/}).waitFor();
+    check(await results.locator('.result-answer').count()===0, '學生結算顯示答案內容');
     check((await results.innerText()).includes('無人作答'), 'unanswered question not marked');
     check(await student.locator('#student-questions').isHidden(), 'F-06: answer area not closed');
   }
+  await page.locator('#teacher-tabs [data-view="results"]').click();
   await page.screenshot({path:'output/playwright/teacher-results.png', fullPage:true});
   await page.context().setOffline(true);
   await studentB.getByText('連線中斷 · 正在重試', {exact:true}).waitFor({timeout:7000});

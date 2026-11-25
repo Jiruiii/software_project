@@ -1,5 +1,6 @@
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 from google_sheets import SheetsWorkflow
@@ -41,6 +42,36 @@ class AutoSyncTests(unittest.TestCase):
 
     def value(self, row=4, col=6): return from_google(self.g.data)[0].value(row, col)
     def state(self): return self.s.snapshot(self.t, self.aid)['source']['sync']['state']
+
+    def test_deleted_activity_leaves_sheet_intact_and_stops_sync(self):
+        self.close_first()
+        self.s.review(self.t, self.aid, self.ids[0], 'incorrect')
+        writing, release = threading.Event(), threading.Event()
+        original = self.g.request
+
+        def paused_write(owner, sid, body=None):
+            if body is not None:
+                writing.set()
+                if not release.wait(3):
+                    raise AssertionError('Test write timed out')
+            return original(owner, sid, body)
+
+        with patch.object(self.g, 'request', paused_write), ThreadPoolExecutor(2) as pool:
+            export = pool.submit(self.flow.export, self.t, self.aid)
+            try:
+                self.assertTrue(writing.wait(2))
+                deletion = pool.submit(self.s.delete_activity, self.t, self.aid, True)
+                self.assertFalse(deletion.done())
+            finally:
+                release.set()
+            self.assertEqual(1, export.result()['written'])
+            self.assertTrue(deletion.result()['ok'])
+        writes = len(self.g.writes)
+        self.auto.run_once()
+        self.assertNotIn(self.aid, self.auto.bindings)
+        self.assertNotIn(self.aid, self.s.sheet_sync_states)
+        self.assertEqual(writes, len(self.g.writes))
+        self.assertEqual('second（B）', self.value())
 
     def test_close_regrade_restore_and_no_redundant_requests(self):
         self.close_first()

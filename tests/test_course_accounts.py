@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import threading
 import time
 import tempfile
@@ -46,6 +47,67 @@ class CourseTests(unittest.TestCase):
 
     def student(self, actor):
         return self.call(actor, "student-room", course=self.course, aid=self.aid)["token"]
+
+    def test_confirmed_deletion_scope_and_cascade(self):
+        self.member("student", True)
+        self.member("student", True, course=self.other)
+        student = self.student("student")
+        self.call("assistant", "home")
+        self.call("teacher", "assistant", course=self.course, uid="assistant")
+        assistant = self.room("assistant", aid=self.aid)
+        other_teacher = self.call("teacher", "staff-room", course=self.other)["token"]
+        other_aid = self.s.create(other_teacher, "另一門課的活動", ["1"])["id"]
+        self.s.transition(self.teacher, self.aid, "active")
+        self.s.submit(student, self.aid, "1", "答案", 2)
+        self.s.transition(self.teacher, self.aid, "results")
+        answer = self.s.snapshot(self.teacher, self.aid)["answers"][0]
+        self.s.review(self.teacher, self.aid, answer["id"], "correct", answer["review_revision"])
+        following = self.s.create(self.teacher, "下一場", ["1"])["id"]
+        self.s.configure(self.teacher, following, "all", priority_source=self.aid)
+        self.assertGreater(self.call("student", "course", course=self.course)["total"], 0)
+        for actor in ("student", "assistant", "admin"):
+            with self.assertRaises(QuizError):
+                self.call(actor, "delete-course", course=self.course, confirmed=True)
+        for token in (student, assistant, other_teacher):
+            with self.assertRaises(QuizError):
+                self.s.delete_activity(token, self.aid, True)
+        with self.assertRaises(QuizError):
+            self.s.delete_activity(self.teacher, self.aid, False)
+        with self.assertRaises(QuizError):
+            self.call("teacher", "delete-course", course=self.course)
+        self.assertEqual(len(self.s.snapshot(self.teacher, self.aid)["answers"]), 1)
+        self.s.delete_activity(self.teacher, self.aid, True)
+        remaining = self.call("student", "course", course=self.course)
+        self.assertEqual([following], [r["id"] for r in remaining["lessons"]])
+        self.assertEqual(remaining["total"], 0)
+        self.assertIsNone(self.s.snapshot(self.teacher, following)["settings"]["priority_source"])
+        with self.assertRaises(QuizError):
+            self.s.snapshot(student, self.aid)
+        second_student = self.call("student", "student-room", course=self.course, aid=following)["token"]
+        self.s.transition(self.teacher, following, "active")
+        self.s.post_chat(second_student, following, "活動進行中", "one")
+        self.s.submit(second_student, following, "1", "第二場")
+        self.call("teacher", "delete-course", course=self.course, confirmed=True)
+        for token in (self.teacher, assistant, second_student):
+            with self.assertRaises(QuizError):
+                self.accounts.scope(token)
+        self.assertEqual([self.other], [r["id"] for r in self.call("student","home")["studying"]])
+        self.assertEqual([], self.call("assistant","home")["teaching"])
+        self.assertEqual(other_aid, self.s.snapshot(other_teacher, other_aid)["id"])
+        self.assertEqual([], self.s.db.execute("PRAGMA foreign_key_check").fetchall())
+        for table in ("answers","submitters","grade_log","review_batches","chat_messages","attendance"):
+            self.assertEqual(0, self.accounts.one(f"SELECT COUNT(*) FROM {table}")[0], table)
+
+    def test_failed_course_deletion_keeps_all_lessons_and_sessions(self):
+        second = self.s.create(self.teacher, "另一場", ["1"])["id"]
+        self.s.sheet_sync_states[self.aid] = {"state":"synced"}
+        self.s.db.execute("""CREATE TEMP TRIGGER block_delete BEFORE DELETE ON courses
+                             BEGIN SELECT RAISE(ABORT, 'test rollback'); END""")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.call("teacher", "delete-course", course=self.course, confirmed=True)
+        self.assertEqual({self.aid, second}, {r["id"] for r in self.s.activities(self.teacher)})
+        self.assertEqual("synced", self.s.sheet_sync_states[self.aid]["state"])
+        self.assertEqual([], self.s.db.execute("PRAGMA foreign_key_check").fetchall())
 
     def test_leave_team_revokes_only_own_course_student_sessions_and_keeps_scores(self):
         self.member("student", True)

@@ -108,12 +108,33 @@ class Courses:
 
     def dispatch(self, token, action, data):
         uid, email = self.verify(token, self.config["projectId"])
+        if action == "delete-course":
+            course = text(data.get("course"), "課程代碼", 64).upper()
+            return self.delete_course(uid, course, data.get("confirmed"))
         with self.s.lock, self.db:
             self.db.execute(
                 "INSERT INTO people(uid,email) VALUES(?,?) ON CONFLICT(uid) DO UPDATE SET email=excluded.email",
                 (uid, email),
             )
             return self.account(uid, email, action, data)
+
+    def delete_course(self, uid, course, confirmed):
+        with self.s.sheet_export_lock, self.s.lock:
+            if self.role(uid, course) != "owner":
+                raise QuizError(403, "只有本課程的授課老師可以刪除課程。")
+            if confirmed is not True:
+                raise QuizError(400, "請先確認刪除整門課程。")
+            lessons = self.rows("SELECT aid FROM lessons WHERE course=?", course)
+            with self.db:
+                for lesson in lessons:
+                    self.s._delete_activity_records(lesson["aid"])
+                self.db.execute("DELETE FROM sessions WHERE token_hash IN (SELECT hash FROM course_sessions WHERE course=?)", (course,))
+                for table in ("members", "teams", "assistants"):
+                    self.db.execute(f"DELETE FROM {table} WHERE course=?", (course,))
+                self.db.execute("DELETE FROM courses WHERE id=?", (course,))
+            for lesson in lessons:
+                self.s.sheet_sync_states.pop(lesson["aid"], None)
+        return {"ok": True}
 
     def account(self, uid, email, action, data):
         course = text(data.get("course", "-"), "課程代碼", 64).upper()
