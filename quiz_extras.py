@@ -40,11 +40,21 @@ class ExtraFeatures:
                     self.db.execute("UPDATE activities SET phase='results',ended_at=(SELECT deadline FROM activity_options WHERE activity_id=?) WHERE id=?", (row['id'],row['id']))
                     self.db.execute('UPDATE activity_options SET deadline=NULL WHERE activity_id=?', (row['id'],))
 
-    def _published_points(self, state, units, options):
-        published = list(units)
-        if state['phase'] != 'results':
-            if state['phase'] != 'active' or options['mode'] != 'sequential': return {}
-            published = published[:options['round_index'] + (0 if options['round_open'] else 1)]
+    def _published_units(self, state, units, options):
+        if state['phase'] == 'results':
+            return list(units)
+        if state['phase'] != 'active':
+            return []
+        if options['mode'] == 'sequential':
+            end = options['round_index'] + (0 if options['round_open'] else 1)
+            return list(units)[:end]
+        return [r[0] for r in self.db.execute(
+            'SELECT DISTINCT unit_id FROM question_meta WHERE activity_id=? AND closed_at IS NOT NULL',
+            (state['id'],))]
+
+    def _published_points(self, state, units, options, published=None):
+        if published is None:
+            published = self._published_units(state, units, options)
         if not published: return {}
         by_question = {q:unit for unit in published for q in units[unit]}
         submissions = {unit:{} for unit in published}
@@ -114,22 +124,32 @@ class ExtraFeatures:
                 pending += 1
         return {'total':total,'pending_units':pending,'awaiting_close_units':awaiting}
 
+    def _reference_values(self, aid, answer, override):
+        from quiz_service import QuizError
+        if not isinstance(answer, str) or len(answer) > 2000:
+            raise QuizError(400, "參考答案最多 2000 字。")
+        if type(override) is not bool:
+            raise QuizError(400, "請選擇是否用老師答案更新學習單。")
+        answer = answer.strip()
+        if override and not answer:
+            raise QuizError(400, "請先填寫老師答案，再勾選更新學習單。")
+        if override and not self.db.execute('SELECT 1 FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone():
+            raise QuizError(409, "這是手動題號活動，只能儲存參考答案。")
+        return answer, int(override)
+
     @expire_first
     def reference(self, token, aid, question, answer, override=False):
         from quiz_service import QuizError
         with self.lock, self.db:
-            self._auth(token, "teacher")
+            self._require_owner(token, aid)
             activity = self._activity(aid)
-            if not isinstance(answer, str) or len(answer) > 2000: raise QuizError(400, "參考答案最多 2000 字。")
             if not isinstance(question, str): raise QuizError(400, "請提供題號。")
             if not self.db.execute('SELECT 1 FROM questions WHERE activity_id=? AND id=?', (aid, question)).fetchone():
                 raise QuizError(404, "題號不存在。")
-            if not self._reviewable(activity, question): raise QuizError(409, "請先關閉此題或結束活動，再填寫老師答案。")
-            if type(override) is not bool: raise QuizError(400, "請選擇是否用老師答案更新學習單。")
-            if override and not answer.strip(): raise QuizError(400, "請先填寫老師答案，再勾選更新學習單。")
-            if override and not self.db.execute('SELECT 1 FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone():
-                raise QuizError(409, "這是手動題號活動，只能儲存參考答案。")
-            cursor = self.db.execute("UPDATE question_meta SET reference_answer=?,reference_override=? WHERE activity_id=? AND question_id=?", (answer.strip(), int(override), aid, question))
+            if activity['phase'] != 'preparing' and not self._reviewable(activity, question):
+                raise QuizError(409, "作答期間請先關閉此題，再填寫老師答案。")
+            answer, flag = self._reference_values(aid, answer, override)
+            cursor = self.db.execute("UPDATE question_meta SET reference_answer=?,reference_override=? WHERE activity_id=? AND question_id=?", (answer, flag, aid, question))
             if not cursor.rowcount: raise QuizError(404, "題號不存在。")
             self._invalidate_sheet_export(aid)
             return {"ok":True}
@@ -234,10 +254,15 @@ class ExtraFeatures:
                                  ('options_json', "TEXT NOT NULL DEFAULT '[]'"),
                                  ('correct_index', 'INTEGER'),
                                  ('correct_indices', "TEXT NOT NULL DEFAULT '[]'"),
-                                 ('betting_enabled', 'INTEGER NOT NULL DEFAULT 1'), ('opened_at', 'REAL'),
+                                 ('betting_enabled', 'INTEGER NOT NULL DEFAULT 1'), ('opened_at', 'REAL'), ('closed_at', 'REAL'),
                                  ('reference_override', 'INTEGER NOT NULL DEFAULT 0')]:
             if name not in columns:
                 self.db.execute(f'ALTER TABLE question_meta ADD COLUMN {name} {definition}')
+        columns = {r['name'] for r in self.db.execute('PRAGMA table_info(review_batches)')}
+        for name, definition in [('owner_uid','TEXT'), ('question','TEXT'), ('verdict','TEXT'),
+                                 ('created_at','REAL'), ('kind','TEXT')]:
+            if name not in columns:
+                self.db.execute(f'ALTER TABLE review_batches ADD COLUMN {name} {definition}')
         self._migrate_answer_timing()
         self.db.commit()
 
@@ -259,7 +284,7 @@ class ExtraFeatures:
     def question_settings(self, token, aid, unit, betting_enabled, questions):
         from quiz_service import QuizError, text
         with self.lock, self.db:
-            self._auth(token, 'teacher')
+            self._require_owner(token, aid)
             if self._activity(aid)['phase'] != 'preparing':
                 raise QuizError(409, '活動開始後不能修改題型、正解或下注開關。')
             units = self._units(aid)
@@ -294,8 +319,18 @@ class ExtraFeatures:
                 prompt = item.get('prompt')
                 if 'prompt' in item and not isinstance(prompt, str):
                     raise QuizError(400, '題目內容必須是文字。')
-                clean[q] = (kind, json.dumps(options, ensure_ascii=False), correct, json.dumps(indices), int(betting_enabled), prompt.strip() if prompt is not None else None, aid, q)
-            self.db.executemany('UPDATE question_meta SET question_type=?,options_json=?,correct_index=?,correct_indices=?,betting_enabled=?,prompt=COALESCE(?,prompt) WHERE activity_id=? AND question_id=?', clean.values())
+                reference, override = None, None
+                if 'reference' in item or 'reference_override' in item:
+                    reference, flag = self._reference_values(aid, item.get('reference'), item.get('reference_override', False))
+                    if 'reference_override' in item or not reference:
+                        override = flag
+                clean[q] = (reference, override, kind, json.dumps(options, ensure_ascii=False), correct,
+                            json.dumps(indices), int(betting_enabled), prompt.strip() if prompt is not None else None, aid, q)
+            self.db.executemany("""UPDATE question_meta SET
+                reference_answer=COALESCE(?,reference_answer),
+                reference_override=COALESCE(?,reference_override),
+                question_type=?,options_json=?,correct_index=?,correct_indices=?,betting_enabled=?,
+                prompt=COALESCE(?,prompt) WHERE activity_id=? AND question_id=?""", clean.values())
             return {'ok': True}
 
     def _grade_submission(self, aid, question, answer, stake):
@@ -360,7 +395,10 @@ class ExtraFeatures:
     def _reviewable(self, activity, question):
         if activity["phase"] == "results": return True
         options = self._options(activity["id"])
-        if activity["phase"] != "active" or options["mode"] != "sequential": return False
+        if activity["phase"] != "active": return False
+        if options["mode"] == "all":
+            return self.db.execute("SELECT 1 FROM question_meta WHERE activity_id=? AND question_id=? AND closed_at IS NOT NULL",
+                                   (activity["id"], question)).fetchone() is not None
         units = list(self._units(activity["id"]).values())
         return any(question in qs and (i < options["round_index"] or (i == options["round_index"] and not options["round_open"])) for i, qs in enumerate(units))
 
@@ -368,9 +406,9 @@ class ExtraFeatures:
     def review(self, token, aid, answer_id, verdict, revision=None):
         from quiz_service import QuizError
         with self.lock, self.db:
-            owner = self._auth(token, "teacher")["token_hash"]
+            owner = self._auth(token, "teacher", aid)["token_hash"]
             activity = self._activity(aid)
-            if type(answer_id) is not int or verdict not in ("correct", "incorrect"):
+            if type(answer_id) is not int or verdict not in ("correct", "incorrect", "pending"):
                 raise QuizError(400, "請提供有效答案與判定。")
             answer = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND id=?", (aid, answer_id)).fetchone()
             if not answer: raise QuizError(404, "找不到這筆答案。")
@@ -378,20 +416,23 @@ class ExtraFeatures:
                 raise QuizError(409, '批改版本已變更，請重新查看後再判定。')
             if not self._reviewable(activity, answer["question_id"]):
                 raise QuizError(409, "請先關閉此題或結束活動，再判定答案。")
+            if verdict == 'pending' and answer['verdict'] == 'pending':
+                raise QuizError(409, '這筆答案已是待判定。')
             question = answer["question_id"]
             before = self._winner_rows(aid).get(question) if verdict == "incorrect" else None
             displaced = before is not None and before["id"] == answer_id
             changes = [{"id": answer_id, "before": answer["verdict"], "revision": answer["review_revision"] + 1}]
-            saved = self._apply_review(token, owner, aid, changes, verdict)
+            saved = self._apply_review(token, owner, aid, changes, verdict, question, "single")
             next_answer = self._winner_rows(aid).get(question) if displaced else None
             candidate = {k: next_answer[k] for k in ("group_name", "verdict")} if next_answer else None
             return {"ok": True, **saved, "displaced": displaced, "candidate": candidate}
 
-    def _log_grades(self, token, ids):
+    def _log_grades(self, token, changes):
         if self.courses:
             uid = self.courses.scope(token)['uid']
-            self.db.executemany('INSERT INTO grade_log SELECT id,review_revision,?,verdict,? FROM answers WHERE id=?',
-                                [(uid, time.time(), answer_id) for answer_id in ids])
+            self.db.executemany("""INSERT INTO grade_log(answer,revision,uid,verdict,stamp,previous_verdict)
+                SELECT id,review_revision,?,verdict,?,? FROM answers WHERE id=?""",
+                [(uid, time.time(), c['before'], c['id']) for c in changes])
 
     def _invalidate_sheet_export(self, aid):
         row = self.db.execute('SELECT source_json FROM sheet_sources WHERE activity_id=?', (aid,)).fetchone()
@@ -424,7 +465,7 @@ class ExtraFeatures:
     def review_batch(self, token, aid, question, selections, verdict):
         from quiz_service import QuizError
         with self.lock, self.db:
-            owner = self._auth(token, "teacher")["token_hash"]
+            owner = self._auth(token, "teacher", aid)["token_hash"]
             activity = self._activity(aid)
             if not isinstance(question, str) or verdict not in ("correct", "incorrect"):
                 raise QuizError(400, "請提供有效題號與判定。")
@@ -446,40 +487,76 @@ class ExtraFeatures:
                     raise QuizError(409, "部分答案已被批改；本次未變更任何答案，請重新比較。")
                 changes.append({"id":answer["id"], "before":answer["verdict"],
                                 "revision":answer["review_revision"] + 1})
-            return self._apply_review(token, owner, aid, changes, verdict)
+            return self._apply_review(token, owner, aid, changes, verdict, question, "batch")
 
-    def _apply_review(self, token, owner, aid, changes, verdict):
+    def _apply_review(self, token, owner, aid, changes, verdict, question, kind):
         self.db.executemany("UPDATE answers SET verdict=?,review_revision=? WHERE id=?",
                             [(verdict, c["revision"], c["id"]) for c in changes])
         batch_id = secrets.token_hex(16)
-        self._log_grades(token, [c["id"] for c in changes])
-        self.db.execute("INSERT INTO review_batches(id,activity_id,owner,changes_json) VALUES(?,?,?,?)",
-                        (batch_id, aid, owner, json.dumps(changes)))
+        self._log_grades(token, changes)
+        uid = self.courses.scope(token)['uid'] if self.courses and kind == 'batch' else None
+        self.db.execute("""INSERT INTO review_batches
+            (id,activity_id,owner,changes_json,owner_uid,question,verdict,created_at,kind)
+            VALUES(?,?,?,?,?,?,?,?,?)""",
+            (batch_id, aid, owner, json.dumps(changes), uid, question, verdict, time.time(), kind))
         self._invalidate_sheet_export(aid)
         return {"batch_id": batch_id, "count": len(changes)}
+
+    def _owned_reviews(self, token, aid, *, batch_id=None):
+        session = self._auth(token, 'teacher', aid)
+        uid = self.courses.scope(token)['uid'] if self.courses else None
+        sql = """SELECT * FROM review_batches WHERE activity_id=? AND
+                 (owner_uid=? OR (owner_uid IS NULL AND owner=?))"""
+        args = [aid, uid, session['token_hash']]
+        if batch_id is not None:
+            sql += ' AND id=?'
+            args.append(batch_id)
+        else:
+            sql += " AND (kind='batch' OR kind IS NULL) ORDER BY rowid DESC"
+        return self.db.execute(sql, args)
+
+    @expire_first
+    def review_history(self, token, aid):
+        with self.lock:
+            rows = self._owned_reviews(token, aid)
+            revisions = {r['id']: r for r in self.db.execute(
+                'SELECT id,question_id,review_revision FROM answers WHERE activity_id=?', (aid,))}
+            history = []
+            for row in rows:
+                changes = json.loads(row['changes_json'])
+                first = revisions.get(changes[0]['id'])
+                reason = ''
+                if row['undone']:
+                    reason = '已復原'
+                elif any(c['id'] not in revisions or revisions[c['id']]['review_revision'] != c['revision'] for c in changes):
+                    reason = '已有後續批改'
+                history.append({'batch_id':row['id'], 'question':row['question'] or (first and first['question_id']),
+                                'created_at':row['created_at'], 'verdict':row['verdict'], 'count':len(changes),
+                                'can_undo':not reason, 'reason':reason})
+            return {'batches':history}
 
     @expire_first
     def undo_review_batch(self, token, aid, batch_id):
         from quiz_service import QuizError
         with self.lock, self.db:
-            owner = self._auth(token, "teacher")["token_hash"]
-            activity = self._activity(aid)
             if not isinstance(batch_id, str): raise QuizError(400, "請提供批改紀錄。")
-            batch = self.db.execute("SELECT * FROM review_batches WHERE id=? AND activity_id=? AND owner=?",
-                                    (batch_id, aid, owner)).fetchone()
+            batch = self._owned_reviews(token, aid, batch_id=batch_id).fetchone()
+            activity = self._activity(aid)
             if not batch: raise QuizError(404, "找不到可撤銷的批改紀錄。")
             if batch["undone"]: raise QuizError(409, "此批次已撤銷。")
             changes = json.loads(batch["changes_json"])
+            undo_log = []
             for change in changes:
                 answer = self.db.execute("SELECT * FROM answers WHERE activity_id=? AND id=?", (aid, change["id"])).fetchone()
                 if not answer or answer["review_revision"] != change["revision"]:
                     raise QuizError(409, "部分答案已有後續批改，無法撤銷；本次未變更任何答案。")
                 if not self._reviewable(activity, answer["question_id"]):
                     raise QuizError(409, "此題目前不能批改。")
+                undo_log.append({'id':answer['id'], 'before':answer['verdict']})
             self.db.executemany("UPDATE answers SET verdict=?,review_revision=review_revision+1 WHERE id=?",
                                 [(c["before"], c["id"]) for c in changes])
             self.db.execute("UPDATE review_batches SET undone=1 WHERE id=?", (batch_id,))
-            self._log_grades(token, [c['id'] for c in changes])
+            self._log_grades(token, undo_log)
             self._invalidate_sheet_export(aid)
             return {"ok":True, "count":len(changes)}
 
@@ -564,6 +641,29 @@ class ExtraFeatures:
                 raise QuizError(409, "請先關閉當題，再開下一題。")
             return {"ok": True}
 
+    def _require_owner(self, token, aid):
+        from quiz_service import QuizError
+        self._auth(token, 'teacher', aid)
+        if self.courses and self.courses.scope(token)['kind'] != 'owner':
+            raise QuizError(403, '只有授課老師可以執行此操作。')
+
+    @expire_first
+    def close_question(self, token, aid, question):
+        from quiz_service import QuizError
+        with self.lock, self.db:
+            self._require_owner(token, aid)
+            if self._activity(aid)['phase'] != 'active' or self._options(aid)['mode'] != 'all':
+                raise QuizError(409, '全題搶答進行中才能個別關題。')
+            row = self.db.execute('SELECT unit_id FROM question_meta WHERE activity_id=? AND question_id=?',
+                                  (aid, question)).fetchone() if isinstance(question, str) else None
+            if not row:
+                raise QuizError(404, '找不到這個題號。')
+            updated = self.db.execute('UPDATE question_meta SET closed_at=? WHERE activity_id=? AND unit_id=? AND closed_at IS NULL',
+                                      (time.time(), aid, row['unit_id']))
+            if updated.rowcount:
+                self.db.execute('UPDATE sheet_sources SET exported_at=NULL WHERE activity_id=?', (aid,))
+            return {'ok': True}
+
     def _submission_gate(self, activity, session, question, received=None):
         from quiz_service import QuizError
         options = self._options(activity["id"])
@@ -574,6 +674,8 @@ class ExtraFeatures:
             units = list(self._units(activity["id"]).values())
             if not options["round_open"] or options["round_index"] < 0 or question not in units[options["round_index"]]:
                 raise QuizError(409, "這一題尚未開放或已關閉。")
+        elif self._reviewable(activity, question):
+            raise QuizError(409, "這一題已關閉，答案未送出。")
         if now < options["priority_until"] and session["group_id"] not in json.loads(options["eligible_json"]):
             raise QuizError(409, "目前是保底先答時間，請等待倒數結束。")
 
@@ -590,7 +692,8 @@ class ExtraFeatures:
         options = self._options(state["id"])
         units = self._units(state["id"])
         state["units"] = [{"id": u, "questions": qs} for u, qs in units.items()]
-        points = self._published_points(state,units,options)
+        published = self._published_units(state, units, options)
+        points = self._published_points(state, units, options, published)
         first = {qs[0]:unit for unit,qs in units.items()}
         for answer in state['answers']:
             detail = points.get(answer.get('group_id',session['group_id']),{}).get(first.get(answer['question_id']))
@@ -610,18 +713,21 @@ class ExtraFeatures:
         state["round"] = {k: options[k] for k in ("round_index", "round_open", "round_started_at", "priority_until", "deadline")}
         state["round"]["unit_id"] = list(units)[options["round_index"]] if options["round_index"] >= 0 else None
         state["round"]["own_priority"] = session["group_id"] in json.loads(options["eligible_json"])
-        available = state["questions"] if state["phase"] == "active" else []
+        closed_set = {q for unit in published for q in units[unit]}
+        closed = [q for q in state['questions'] if q in closed_set]
+        state["closed_questions"] = closed
+        available = [q for q in state["questions"] if q not in closed_set] if state["phase"] == "active" else []
         if options["mode"] == "sequential":
             available = units.get(state["round"]["unit_id"], []) if options["round_open"] and state["phase"] == "active" else []
         if state["server_time"] < options["priority_until"] and not state["round"]["own_priority"] and session["role"] == "student":
             available = []
         state["available_questions"] = available
         if session["role"] == "teacher":
-            state["reviewable_questions"] = [q for q in state["questions"] if self._reviewable(state, q)]
+            state["reviewable_questions"] = closed
             state['reference_overrides'] = {r['question_id']:bool(r['reference_override']) for r in self.db.execute('SELECT question_id,reference_override FROM question_meta WHERE activity_id=?', (state['id'],))}
         state["references"] = {r["question_id"]:r["reference_answer"]
                                for r in self.db.execute("SELECT question_id,reference_answer FROM question_meta WHERE activity_id=?", (state["id"],))
-                               if session['role'] == 'teacher' or self._reviewable(state,r['question_id'])}
+                               if session['role'] == 'teacher' or r['question_id'] in closed_set}
         if state["phase"] == "results":
             pending=self.db.execute("SELECT COUNT(*) FROM answers WHERE activity_id=? AND verdict='pending'",(state['id'],)).fetchone()[0]
             state['grading']={'pending_answers':pending,'complete':pending==0}

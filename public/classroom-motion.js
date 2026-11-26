@@ -270,10 +270,10 @@ const classroomMotion = (() => {
     const next = result.candidate;
     const incorrect = verdict==='incorrect';
     const caption = incorrect ? `${answer.group_name} 判錯` : '單筆批改';
-    let message = incorrect ? '' : '正解';
+    let message = verdict==='pending'?'已改回待判定':incorrect?'':'正解';
     if (result.displaced) message = next ? `遞補：${next.group_name} · ${verdictNames[next.verdict]}` : '沒有其他候選答案';
     await present({activity,answer,batch:result.batch_id,revision:answer.review_revision+1,caption,message,
-      effect:incorrect?'erase':'stamp'},order,session,keyboard);
+      effect:verdict==='pending'?'':incorrect?'erase':'stamp'},order,session,keyboard);
   }
   function stopPriority() {
     clearTimeout(priorityTimer);

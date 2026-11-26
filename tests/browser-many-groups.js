@@ -11,7 +11,7 @@ async (page) => {
   await page.locator('#login-form button').click();
   await page.locator('#activity-title').fill('30 組同時搶答・自動驗收');
   await page.locator('#question-count').fill('6');
-  await page.locator('#create-form button').click();
+  await page.locator('#create-form button[type=submit]').click();
   await page.locator('#activity').waitFor({state:'visible'});
   const code = await page.locator('#session-code').innerText();
   const teacher = await page.evaluate(()=>JSON.parse(sessionStorage.getItem('classroom.auth')));

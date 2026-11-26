@@ -246,7 +246,7 @@ class QuizService(ExtraFeatures):
                             (hashlib.sha256(token.encode()).hexdigest(),))
             return {"ok": True}
 
-    def create(self, token, title, questions, _commit=True):
+    def create(self, token, title, questions, _commit=True, *, groups=None):
         from contextlib import nullcontext
         with self.lock, self.db if _commit else nullcontext():
             self._auth(token, "teacher")
@@ -266,6 +266,23 @@ class QuizService(ExtraFeatures):
             self.db.executemany("INSERT INTO questions VALUES(?,?,?)",
                                 [(aid, q, i) for i, q in enumerate(questions)])
             self._new_options(aid)
+            if groups is not None:
+                if not isinstance(groups, list) or len(groups) > len(questions):
+                    raise QuizError(400, "題組格式無效。")
+                used, parents = set(), set()
+                for group in groups:
+                    if not isinstance(group, dict) or not isinstance(group.get("questions"), list):
+                        raise QuizError(400, "請指定母題與子題。")
+                    parent = text(group.get("id"), "母題題號", 40)
+                    children = [text(q, "子題題號", 40) for q in group["questions"]]
+                    if parent in questions or parent in parents:
+                        raise QuizError(400, "母題題號不可與其他題號重複。")
+                    if len(children) < 2 or len(set(children)) != len(children) or any(q not in questions or q in used for q in children):
+                        raise QuizError(400, "每個題組至少需要兩個相異子題，每個子題只能屬於一組。")
+                    used.update(children)
+                    parents.add(parent)
+                    self.db.executemany("UPDATE question_meta SET unit_id=? WHERE activity_id=? AND question_id=?",
+                                        [(parent, aid, q) for q in children])
             if self.courses:
                 scope = self.courses.scope(token)
                 if scope['kind'] != 'owner':

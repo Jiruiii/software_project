@@ -118,7 +118,8 @@ class ExtraTests(unittest.TestCase):
         self.assertEqual("B", self.s.snapshot(self.u, self.aid)["results"][0]["winner"]["group_name"])
         self.s.review(self.t, self.aid, ids[1], "incorrect")
         self.assertIsNone(self.s.snapshot(self.u, self.aid)["results"][0]["winner"])
-        with self.assertRaises(QuizError): self.s.review(self.t, self.aid, ids[0], "pending")
+        self.s.review(self.t, self.aid, ids[0], "pending")
+        self.assertEqual("pending", self.s.snapshot(self.u, self.aid)["results"][0]["status"])
         for verdict in ("correct", "correct"):
             self.s.review(self.t, self.aid, ids[0], verdict)
             winner = self.s.snapshot(self.u, self.aid)["results"][0]["winner"]
@@ -140,8 +141,9 @@ class ExtraTests(unittest.TestCase):
         with self.assertRaises(QuizError): self.s.clusters(self.t, self.aid, "unknown")
 
     def test_e07_private_report_references_and_score(self):
-        for fn,args in [(self.s.report_csv,(self.u,self.aid)),(self.s.reference,(self.t,self.aid,"1","reference"))]:
-            with self.assertRaises(QuizError): fn(*args)
+        with self.assertRaises(QuizError): self.s.report_csv(self.u,self.aid)
+        self.s.reference(self.t,self.aid,"1","reference")
+        self.assertEqual({}, self.s.snapshot(self.u,self.aid)["references"])
         self.s.transition(self.t, self.aid, "active")
         self.s.submit(self.u, self.aid, "1", "own answer", 3)
         self.s.submit(self.v, self.aid, "1", "other secret", 2)

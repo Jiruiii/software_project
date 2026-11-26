@@ -123,7 +123,9 @@ class SheetsAutoSync:
                 JOIN lessons l ON l.aid=s.activity_id JOIN activities a ON a.id=l.aid
                 JOIN activity_options o ON o.activity_id=a.id
                 WHERE s.exported_at IS NULL AND (a.phase='results' OR
-                    (a.phase='active' AND o.mode='sequential' AND (o.round_index>0 OR o.round_open=0)))
+                    (a.phase='active' AND o.mode='sequential' AND (o.round_index>0 OR o.round_open=0)) OR
+                    (a.phase='active' AND EXISTS (SELECT 1 FROM question_meta m
+                        WHERE m.activity_id=a.id AND m.closed_at IS NOT NULL)))
             """).fetchall()
         for aid, course in jobs:
             if self.stop_event.is_set():

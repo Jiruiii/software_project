@@ -42,7 +42,7 @@ async (page) => {
   await post(path+'/answers',{question:'2',answer:'正解',stake:2},b);
   const previous=await page.evaluate(()=>current.source.exported_at);
   await page.locator('#close-round').click(); await synced(previous);
-  check(await page.locator('#monitor-table [data-verdict="pending"]').count()===0,'Choice pending action present');
+  check(await page.locator('#monitor-table [data-verdict="pending"]').count()>0,'Missing action to return a graded choice to pending');
   await page.setViewportSize({width:390,height:844});
   await page.screenshot({path:'output/playwright/auto-sync-mobile.png',fullPage:true});
   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');

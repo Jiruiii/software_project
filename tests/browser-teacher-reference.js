@@ -29,6 +29,16 @@ async (page) => {
   await page.locator('#session-code-block').getByText('已複製').waitFor();
   await page.evaluate(()=>{delete navigator.clipboard;});
   check(await page.evaluate(()=>navigator.clipboard.readText())===code,'Fallback copy failed');
+  await page.locator('#teacher-tabs [data-view=questions]').click();
+  const first=page.locator('#question-settings-forms details').first();
+  if(!await first.evaluate(e=>e.open)) await first.locator('summary').click();
+  await first.locator('.setup-reference').fill('備課草稿');
+  await first.locator('.setup-reference-override').check();
+  await page.locator('#save-settings').click();
+  await page.waitForFunction(()=>current.references['1']==='備課草稿' && current.reference_overrides['1']);
+  await first.locator('.setup-reference').fill('');
+  await page.locator('#save-settings').click();
+  await page.waitForFunction(()=>!current.references['1'] && !current.reference_overrides['1']);
   const student=(await post('/api/join',{code,group:'測試組'})).token;
   const studentPage=await page.context().newPage();studentPage.on('pageerror',e=>errors.push(String(e)));
   await studentPage.goto(base);
