@@ -100,6 +100,34 @@ class AutoSyncTests(unittest.TestCase):
         self.assertEqual([], calls)
         self.assertNotIn('unpublished', str(self.g.writes))
 
+    def test_close_one_in_all_mode_and_regrade_without_writing_open_cells(self):
+        self.s.question_settings(self.t,self.aid,'2',True,[{'question':'2','type':'short',
+            'reference':'第二題老師答案','reference_override':True}])
+        self.assertTrue(self.s.snapshot(self.t,self.aid)['reference_overrides']['2'])
+        self.s.transition(self.t,self.aid,'active')
+        self.s.submit(self.u,self.aid,'1','第一組答案',2)
+        self.s.submit(self.v,self.aid,'1','第二組答案',1)
+        self.s.submit(self.u,self.aid,'2','開放中')
+        self.s.close_question(self.t,self.aid,'1')
+        self.auto.run_once()
+        self.assertEqual('第一組答案（A）',self.value())
+        written=len(self.g.writes)
+        self.s.close_question(self.t,self.aid,'1')
+        self.auto.run_once()
+        self.assertEqual(written,len(self.g.writes))
+        first=self.s.snapshot(self.t,self.aid)['answers'][0]['id']
+        self.s.review(self.t,self.aid,first,'incorrect',0)
+        self.auto.run_once()
+        self.assertEqual('第二組答案（B）',self.value())
+        self.s.review(self.t,self.aid,first,'pending',1)
+        self.auto.run_once()
+        self.assertEqual('第一組答案（A）',self.value())
+        self.assertNotIn('第二題老師答案',str(self.g.writes))
+        self.assertNotIn('開放中',str(self.g.writes))
+        self.s.close_question(self.t,self.aid,'2')
+        self.auto.run_once()
+        self.assertIn('第二題老師答案（老師答案）',str(self.g.writes))
+
     def test_batch_and_undo_sync_original_candidate(self):
         self.close_first()
         selections = [{'id':a['id'], 'revision':a['review_revision']} for a in self.s.snapshot(self.t, self.aid)['answers']]

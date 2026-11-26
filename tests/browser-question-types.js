@@ -6,7 +6,7 @@ async (page) => {
     page.on('pageerror',e=>errors.push(String(e)));
     await page.locator('#choose-teacher').click(); await page.locator('#teacher-password').fill('extras-test-only');
     await page.locator('#login-form button').click(); await page.locator('#activity-title').fill('題型與不押驗收');
-    await page.locator('#question-count').fill('4'); await page.locator('#create-form button').click();
+    await page.locator('#question-count').fill('4'); await page.locator('#create-form button[type=submit]').click();
     await page.locator('#settings-form').waitFor({state:'visible'});
     await page.locator('#quiz-mode').selectOption('sequential'); await page.locator('#save-settings').click();
     await page.locator('#notice').filter({hasText:'所有設定已儲存'}).waitFor();

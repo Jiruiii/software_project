@@ -147,7 +147,7 @@ async page => {
   await page.locator('#workspace').getByRole('button',{name:'建立搶答活動',exact:true}).click();
   await page.locator('#activity-title').fill('第一堂');
   await rail.getByRole('link',{name:'我的課程',exact:true}).waitFor();
-  await page.locator('#create-form button').click();
+  await page.locator('#create-form button[type=submit]').click();
   await page.locator('#session-code').waitFor();
   if(await page.locator('#session-code').innerText()!==code) throw Error('活動內課程代碼不一致');
   await checkCopy('課程代碼',code);
@@ -413,7 +413,7 @@ async page => {
   await nav('建立搶答活動');
   await page.locator('#activity-title').fill('逐題手機課堂');
   await page.locator('#question-count').fill('2');
-  await page.locator('#create-form button').click();
+  await page.locator('#create-form button[type=submit]').click();
   await page.locator('#quiz-mode').selectOption('sequential');
   await fromDirectory('#start');
   await page.waitForFunction(()=>current.phase==='active' && current.round.round_open);
@@ -446,7 +446,7 @@ async page => {
   await button('學生').click();
   await button('使用 Google 帳號登入').click();
   await page.getByRole('heading',{name:'我的課程'}).waitFor();
-  if(await rail.getByText('加入小組').count() || await rail.getByText('新增課程').count() || await rail.getByText('課程排行榜').count()) throw Error('助教首頁顯示錯誤角色');
+  if(await rail.getByText('加入小組').count() || await rail.getByText('新增課程').count() || !await rail.getByText('課程排行榜').count()) throw Error('助教首頁顯示錯誤角色');
   await button('生物 · 助教').click();
   await page.locator('#workspace .share-code').waitFor();
   if(await button('刪除課程').count()) throw Error('助教看到刪除課程入口');

@@ -43,7 +43,11 @@ class TeacherReferenceTests(unittest.TestCase):
         self.assertEqual('everyone wrong',self.s.snapshot(self.u,self.aid)['report'][0]['reference'])
 
     def test_phase_validation_and_reference_only(self):
-        with self.assertRaises(QuizError): self.s.reference(self.t,self.aid,'1','x',True)
+        self.s.reference(self.t,self.aid,'1','x',True)
+        self.assertEqual({}, self.s.snapshot(self.u,self.aid)['references'])
+        self.auto.run_once()
+        self.assertFalse(self.g.writes)
+        self.s.reference(self.t,self.aid,'1','')
         self.close_first()
         for token,q,answer,override in [(self.u,'1','x',True),(self.t,'2','x',True),(self.t,'missing','x',False),
                                       (self.t,'1',' ',True),(self.t,'1','x','true'),(self.t,'1','x'*2001,False)]:

@@ -630,3 +630,5 @@ button.gallery-card:hover { border-color: var(--chalk); background: var(--surfac
   .course-index .course-toolbar { display: none; }
 }
 #guide-timeline button[aria-current="step"] { border-top-color: var(--signal); }
+
+.replay-controls select { width: auto; }

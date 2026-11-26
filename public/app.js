@@ -142,10 +142,42 @@ $("join-form").onsubmit = (event) => {
     saveAuth(await api("/api/join", {code: $("join-code").value, group: $("join-group").value})); await refresh();
   });
 };
+function manualNumbers() {
+  return $('custom-questions').open ? $('question-numbers').value.trim().split(/\r?\n/).map(q=>q.trim()) :
+    Array.from({length:Number($('question-count').value)}, (_,i)=>String(i+1));
+}
+$('add-group').onclick=()=>{
+  const groups=$('manual-groups'), field=el('fieldset'), parent=el('input');
+  const used=new Set([...groups.querySelectorAll('.parent-number')].map(input=>input.value.trim()));
+  const candidates=manualNumbers();
+  let next=1;
+  while(used.has(String(next)) || candidates.includes(String(next))) next++;
+  parent.value=candidates.find(q=>q && !used.has(q)) || String(next);
+  parent.className='parent-number'; parent.required=true; parent.maxLength=40;
+  const label=el('label','母題題號'); label.append(parent);
+  const children=el('div');
+  const addChild=()=>{
+    const child=el('input'), row=el('label','子題題號');
+    child.value=parent.value.trim()+'.'+(children.children.length+1);
+    child.required=true; child.maxLength=40; child.className='child-number';
+    row.append(child); children.append(row);
+  };
+  addChild(); addChild();
+  const add=el('button','新增子題','secondary'), remove=el('button','移除題組','text-button');
+  add.type=remove.type='button'; add.onclick=addChild; remove.onclick=()=>field.remove();
+  field.append(el('legend','題組'),label,el('p','同名的單題會改成這個題組。','field-hint'),children,add,remove);
+  groups.append(field); parent.focus();
+};
 $("create-form").onsubmit = (event) => {
   event.preventDefault(); action(event.submitter, async () => {
-    const data = await api("/api/activities", {title: $("activity-title").value,
-      questions: $('custom-questions').open ? $("question-numbers").value.trim().split(/\r?\n/) : Array.from({length:Number($('question-count').value)},(_,i)=>String(i+1))});
+    const groups=[...$('manual-groups').children].map(field=>({
+      id:field.querySelector('.parent-number').value.trim(),
+      questions:[...field.querySelectorAll('.child-number')].map(input=>input.value.trim())
+    }));
+    const base=manualNumbers(), order=[...base,...groups.map(g=>g.id).filter(id=>!base.includes(id))];
+    const questions=order.flatMap(q=>groups.find(g=>g.id===q)?.questions ?? [q]);
+    const data=await api('/api/activities',{title:$('activity-title').value,questions,groups});
+    $('manual-groups').replaceChildren();
     $("create-form").reset(); $('custom-questions').open=false; syncQuestionInput(); selectActivity(data.id); await refresh();
   });
 };
@@ -422,7 +454,7 @@ function updateInputs() {
     const unitIndex=current.units.findIndex(u=>u.id===card.dataset.unit);
     const sequential=current.settings.mode==='sequential';
     const upcoming=current.phase==='preparing' || (sequential && unitIndex>current.round.round_index);
-    const closed=current.phase==='results' || (sequential && (unitIndex<current.round.round_index || (unitIndex===current.round.round_index && !current.round.round_open)));
+    const closed=current.closed_questions.includes(card.dataset.question);
     card.classList.toggle('upcoming',upcoming);
     card.classList.toggle('sent',sent);
     const received=answers.get(card.dataset.question);
@@ -500,14 +532,16 @@ function renderMonitor(state) {
         if(answer.author) cell.append(el('small','送出者　'+answer.author));
         if(answer.reviews?.length) {
           const history=el('details'); history.open=open; history.append(el('summary','批改紀錄（'+answer.reviews.length+'）'));
-          for(const r of answer.reviews) history.append(el('small',new Date(r.stamp*1000).toLocaleString()+' · '+r.email+' · '+verdictNames[r.verdict]));
+          for(const r of answer.reviews) history.append(el('small',new Date(r.stamp*1000).toLocaleString()+' · '+r.email+' · '+(r.previous_verdict?verdictNames[r.previous_verdict]+' → ':'')+verdictNames[r.verdict]));
           cell.append(history);
         }
         if (reviewable) {
           const controls = el("div", undefined, "review-controls");
-          for (const verdict of ['correct','incorrect']) {
-            const button = el('button', verdictNames[verdict], 'text-button'); button.dataset.verdict = verdict;
+          for (const verdict of ['correct','incorrect','pending']) {
+            if(verdict==='pending' && answer.verdict==='pending') continue;
+            const button = el('button', verdict==='pending'?'改回待判定':verdictNames[verdict], 'text-button'); button.dataset.verdict = verdict;
             button.setAttribute('aria-label', `${group.name} 第 ${q} 題判為${verdictNames[verdict]}`);
+            if(verdict==='pending') button.setAttribute('aria-label',`${group.name} 第 ${q} 題改回待判定`);
             button.disabled = answer.verdict === verdict;
             button.onclick = event => action(button,()=>classroomMotion.review(state.id,answer,verdict,event.detail===0));
             controls.append(button);
@@ -554,6 +588,15 @@ function renderResults(state) {
   $("results").replaceChildren(list);
 }
 let replayKey = "", replayFrame = 0, replayElapsed = 0, replayLast = 0, replayRunning = false;
+let replaySpeed=1;
+function advanceReplayClock(now) {
+  replayElapsed+=Math.max(0,now-replayLast)*replaySpeed;
+  replayLast=now;
+}
+$('replay-speed').onchange=()=>{
+  if(replayRunning) advanceReplayClock(performance.now());
+  replaySpeed=Number($('replay-speed').value);
+};
 function resetReplay() {
   cancelAnimationFrame(replayFrame); replayRunning = false; replayElapsed = 0;
   $("replay-play").textContent = "播放"; $("replay-answers").replaceChildren();
@@ -561,7 +604,7 @@ function resetReplay() {
 }
 function replayTick(now) {
   if (!replayRunning) return;
-  replayElapsed += now - replayLast; replayLast = now;
+  advanceReplayClock(now);
   const answers = current.answers.filter(a => a.question_id === $("replay-question").value);
   // Keep the immutable receipt ordering; cap long gaps for classroom playback.
   let due = 0, previous = null, shown = 0;
@@ -580,7 +623,7 @@ function replayTick(now) {
   } else { $("replay-status").textContent = `已播放 ${shown} / ${answers.length} 筆`; replayFrame = requestAnimationFrame(replayTick); }
 }
 function playReplay() {
-  if (replayRunning) {replayRunning = false; cancelAnimationFrame(replayFrame); $("replay-play").textContent = "繼續播放"; return;}
+  if (replayRunning) {advanceReplayClock(performance.now()); replayRunning = false; cancelAnimationFrame(replayFrame); $("replay-play").textContent = "繼續播放"; return;}
   replayRunning = true; replayLast = performance.now(); $("replay-play").textContent = "暫停";
   replayFrame = requestAnimationFrame(replayTick);
 }
@@ -592,7 +635,7 @@ function renderReplay(state) {
   $("replay").hidden = !enabled;
   const key = enabled ? JSON.stringify([state.id, state.answers, state.results]) : "";
   if (key === replayKey) return;
-  replayKey = key; resetReplay();
+  replayKey = key; resetReplay(); replaySpeed=1; $("replay-speed").value="1";
   if (enabled) $("replay-question").replaceChildren(...state.questions.map(q => {const option = el("option", `第 ${q} 題`); option.value = q; return option;}));
 }
 function renderLiveRanking(state) {
@@ -607,7 +650,7 @@ function renderLiveRanking(state) {
   const key=JSON.stringify([state.id,rows,state.settings.mode,state.group_name]);
   if(list.dataset.values===key) return;
   list.dataset.values=key;
-  const rule=state.settings.mode==='sequential' ? '累計本場已關題的得分' : '全題模式於本場結束時計分';
+  const rule='累計本場已關題的得分';
   $('live-ranking-hint').textContent=rows.length ? rule : '尚無小組加入本場。';
   list.replaceChildren(...rows.map(row=>{
     const item=el('li');
@@ -648,7 +691,7 @@ function renderState(state,sequence) {
     $('own-score-parts').textContent=scoreParts(state.own_points);
     $('own-score-total').textContent=`${state.own_score.total} 分`;
     const waiting=[];
-    if(state.own_score.awaiting_close_units) waiting.push(`已送出 ${state.own_score.awaiting_close_units} 題，等待${state.settings.mode==='sequential'?'本題':'搶答'}結束`);
+    if(state.own_score.awaiting_close_units) waiting.push(`已送出 ${state.own_score.awaiting_close_units} 題，等待本題結束`);
     if(state.own_score.pending_units) waiting.push(`${state.own_score.pending_units} 題待批改`);
     $('own-score-pending').textContent=waiting.join(' · ');
     $('own-score-pending').hidden=!waiting.length;
@@ -908,7 +951,38 @@ function renderReport(state) {
     $('report-table').replaceChildren(table);
   }
 }
+let historyRequest=0, historySnapshot='';
+async function loadBatchHistory() {
+  const id=activityId, version=++historyRequest, list=$('batch-history-list');
+  try {
+    const data=await api(`/api/activities/${id}/review-history`);
+    if(id!==activityId || version!==historyRequest) return;
+    list.replaceChildren();
+    if(!data.batches.length) list.append(el('p','尚無批次批改紀錄。'));
+    for(const batch of data.batches) {
+      const row=el('div',undefined,'cluster-actions');
+      const when=batch.created_at?new Date(batch.created_at*1000).toLocaleString('zh-TW'):'舊紀錄，時間不詳';
+      row.append(el('span',`第 ${batch.question} 題 · ${when} · ${verdictNames[batch.verdict] || '舊判定'} · ${batch.count} 筆`));
+      const undo=el('button',batch.reason || '復原這個批次','secondary');
+      undo.type='button'; undo.disabled=!batch.can_undo;
+      undo.onclick=()=>action(undo,async()=>{
+        try {
+          const result=await api(`/api/activities/${id}/review-undo`,{batch_id:batch.batch_id});
+          if(id!==activityId) return;
+          if(clusterUndo?.batch_id===batch.batch_id) {clusterUndo=null; $('cluster-undo-area').hidden=true;}
+          notice(`已復原 ${result.count} 筆批改。`,true);
+          await refresh(); await loadClusters();
+        } finally {if(id===activityId) await loadBatchHistory();}
+      });
+      row.append(undo); list.append(row);
+    }
+  } catch(error) {if(id===activityId && version===historyRequest) list.textContent=error.message;}
+}
+$('batch-history').ontoggle=()=>{
+  if($('batch-history').open && activityId) loadBatchHistory();
+};
 function resetClusterReview() {
+  historyRequest++; historySnapshot=''; $('batch-history').open=false; $('batch-history-list').replaceChildren();
   clusterRequest++; clusterUndo = null;
   $('cluster-undo-area').hidden = true;
   $('cluster-feedback').hidden = true;
@@ -1038,7 +1112,25 @@ function renderQuestionSettings(state) {
       const toggle=()=>{choiceBox.hidden=options.disabled=kind.value==='short'; options.required=!options.disabled; correctLabel.hidden=correct.hidden=correct.disabled=kind.value!=='choice'; correct.required=!correct.disabled; keys.hidden=keys.disabled=kind.value!=='multiple';};
       kind.onchange=toggle; options.oninput=()=>{rebuild();rebuildKeys(checkedOptions(keys));}; toggle();
       choiceBox.append(optionLabel,options,correctLabel,correct,keys); box.append(choiceBox); fields.append(box);
-      configs.push({q,kind,lines,correct,prompt,keys,options});
+      const reference=el('textarea'), referenceLabel=el('label',`第 ${q} 題的老師參考答案（選填，關題後公布）`);
+      reference.className='setup-reference'; reference.maxLength=2000; reference.rows=2;
+      reference.defaultValue=state.references[q] || '';
+      if(saved?.reference!==undefined) reference.value=saved.reference;
+      referenceLabel.append(reference); box.append(referenceLabel);
+      let override=null;
+      if(state.source) {
+        override=el('input'); override.type='checkbox'; override.className='setup-reference-override';
+        override.defaultChecked=!!state.reference_overrides[q];
+        override.checked=saved?.override ?? override.defaultChecked;
+        const label=el('label',undefined,'check-label');
+        label.append(override,document.createTextNode('關題後用老師答案更新學習單')); box.append(label);
+        const syncOverride=()=>{
+          override.disabled=!reference.value.trim();
+          if(override.disabled) override.checked=false;
+        };
+        reference.oninput=syncOverride; syncOverride();
+      }
+      configs.push({q,kind,lines,correct,prompt,keys,options,reference,override});
     }
     const status=el('p','設定已儲存','field-hint');
     const summarize=()=>{description.textContent=`${configs.map(c=>({choice:'單選',multiple:'多選',short:'簡答'})[c.kind.value]).filter((v,i,a)=>a.indexOf(v)===i).join('＋')} · ${betting.checked?'可下注':'不押分'}`;};
@@ -1046,7 +1138,7 @@ function renderQuestionSettings(state) {
     form.oninput=form.onchange=()=>{
       markDirty();
       writeSetupDraft(draftKey,{betting:betting.checked,questions:configs.map(c=>({
-        prompt:c.prompt.value,kind:c.kind.value,options:c.options.value,
+        prompt:c.prompt.value,reference:c.reference.value,override:c.override?.checked,kind:c.kind.value,options:c.options.value,
         correct:c.correct.selectedOptions[0]?.dataset.answer || '',keys:checkedOptions(c.keys)
       }))});
     };
@@ -1054,7 +1146,13 @@ function renderQuestionSettings(state) {
     fields.append(status); form.append(fields);
     form.prepareSettings=()=>{
       const questions=configs.map(c=>({question:c.q,type:c.kind.value,options:c.kind.value==='short'?[]:c.lines(),correct_index:c.correct.value===''?null:Number(c.correct.value),correct_indices:checkedOptions(c.keys).map(v=>c.lines().indexOf(v))}));
-      configs.forEach((c,i)=>{if(c.prompt.value!==c.prompt.defaultValue) questions[i].prompt=c.prompt.value;});
+      configs.forEach((c,i)=>{
+        if(c.prompt.value!==c.prompt.defaultValue) questions[i].prompt=c.prompt.value;
+        if(c.reference.value!==c.reference.defaultValue || (c.override && c.override.checked!==c.override.defaultChecked)) {
+          questions[i].reference=c.reference.value;
+          if(c.override) questions[i].reference_override=c.override.checked;
+        }
+      });
       for (const q of questions) if(q.type!=='short' && (q.options.length<2 || q.options.length>8 || q.options.some(x=>x.length>200) || new Set(q.options).size!==q.options.length || (q.type==='multiple'?!q.correct_indices.length:q.correct_index===null || q.correct_index>=q.options.length))) {
         showTeacherView('questions'); details.open=true; const box=form.querySelector(`[data-question="${CSS.escape(q.question)}"]`); box.scrollIntoView({block:'center'}); box.querySelector(q.type==='choice' && q.correct_index===null?'.choice-correct':'.choice-options').focus();
         throw new Error(`第 ${q.question} 題：請填寫 2～8 個不重複選項（每項最多 200 字），並指定正確選項。`);
@@ -1062,7 +1160,7 @@ function renderQuestionSettings(state) {
       return {unit:unit.id,betting_enabled:betting.checked,questions};
     };
     form.persistSettings=async payload=>{
-      try {await api(`/api/activities/${state.id}/question-settings`,payload); configs.forEach((c,i)=>{if ('prompt' in payload.questions[i]) c.prompt.defaultValue=payload.questions[i].prompt;}); sessionStorage.removeItem(draftKey); form.dataset.dirty='false'; status.textContent='設定已儲存'; updateSetupStatus();}
+      try {await api(`/api/activities/${state.id}/question-settings`,payload); configs.forEach((c,i)=>{if ('prompt' in payload.questions[i]) c.prompt.defaultValue=payload.questions[i].prompt; if ('reference' in payload.questions[i]) c.reference.defaultValue=payload.questions[i].reference; if ('reference_override' in payload.questions[i]) c.override.defaultChecked=payload.questions[i].reference_override;}); sessionStorage.removeItem(draftKey); form.dataset.dirty='false'; status.textContent='設定已儲存'; updateSetupStatus();}
       catch(error) {showTeacherView('questions'); details.open=true; summary.scrollIntoView({block:'center'}); throw new Error(`第 ${unit.id} 題儲存失敗：${error.message}`);}
     };
     form.onsubmit=event=>event.preventDefault();
@@ -1160,6 +1258,10 @@ function renderTeacherWorkspace(state) {
   $('grading-review').hidden=!ended || !pending || teacherView==='monitor';
   $('monitor-privacy').hidden=preparing;
   for(const id of ['replay','classification']) $(`tool-${id}`).hidden=teacherView!=='tools' || (id!=='classification' && !ended);
+  if($('batch-history').open) {
+    const signature=JSON.stringify([state.id,state.answers.map(a=>[a.id,a.review_revision])]);
+    if(signature!==historySnapshot) {historySnapshot=signature; loadBatchHistory();}
+  }
   renderTeacherReference(state);
   $('teacher-question-filter').hidden=preparing || !['monitor','results'].includes(teacherView);
   $('references').hidden=!state.reviewable_questions.length || !['monitor','results'].includes(teacherView);
@@ -1207,9 +1309,16 @@ function renderReviewGuide(state) {
   const sequential=state.settings.mode==='sequential', ended=state.phase==='results';
   const {round_index:index,round_open:open,unit_id:unitId}=state.round;
   const selected=$('monitor-question').value;
+  const unit=state.units.find(u=>u.questions.includes(selected));
+  const canClose=!sequential && !ended && !auth?.assistant && unit && !state.closed_questions.includes(selected);
+  $('close-selected-area').hidden=!canClose;
+  if(canClose) {
+    $('close-selected').textContent=unit.questions.length>1?'關閉整個題組':'關閉本題';
+    $('close-selected-scope').textContent='停止收件的題號：'+unit.questions.join('、');
+  }
   $('guide-mode').textContent=sequential?'逐題搶答':'全題模式';
   $('guide-round').textContent=ended?'整場已結束':sequential?
-    `目前第 ${unitId} 題 · ${open?'作答中':'已關閉'}`:'全部題目作答中';
+    `目前第 ${unitId} 題 · ${open?'作答中':'已關閉'}`:(state.closed_questions.length?`已關閉 ${state.closed_questions.length} / ${state.questions.length} 題`:'全部題目作答中');
   const timeline=$('guide-timeline');
   const shape=JSON.stringify([state.id,state.units]);
   const rebuilt=timeline.dataset.shape!==shape;
@@ -1227,13 +1336,13 @@ function renderReviewGuide(state) {
       item.append(step); timeline.append(item);
     }
   }
-  const progress=JSON.stringify([index,open,ended,sequential,selected]);
+  const progress=JSON.stringify([index,open,ended,sequential,selected,state.closed_questions]);
   if(rebuilt || timeline.dataset.progress!==progress) {
     timeline.dataset.progress=progress;
     for(const [i,item] of [...timeline.children].entries()) {
       const unit=state.units[i], step=item.firstChild, currentUnit=sequential && !ended && index===i;
       const upcoming=sequential && i>index;
-      const closed=ended || (sequential && (i<index || (currentUnit && !open)));
+      const closed=state.closed_questions.includes(unit.questions[0]);
       const status=upcoming?'未開放':closed?'已關閉':'作答中';
       step.dataset.state=status;
       if(currentUnit) step.setAttribute('aria-current','step'); else step.removeAttribute('aria-current');
@@ -1261,6 +1370,11 @@ function renderReviewGuide(state) {
     prompts.append(entry);
   }
 }
+$('close-selected').onclick=()=>action($('close-selected'),async()=>{
+  const question=$('monitor-question').value;
+  await api(`/api/activities/${activityId}/close-question`,{question});
+  await refresh();
+});
 function syncMonitorFilter(state) {
   const key=state.id+JSON.stringify(state.questions);
   if(monitorKey!==key) {

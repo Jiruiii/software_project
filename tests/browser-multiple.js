@@ -3,7 +3,7 @@ async (page) => {
   try {
     await page.locator('#choose-teacher').click(); await page.locator('#teacher-password').fill('extras-test-only');
     await page.locator('#login-form button').click(); await page.locator('#activity-title').fill('多選測試');
-    await page.locator('#question-count').fill('1'); await page.locator('#create-form button').click();
+    await page.locator('#question-count').fill('1'); await page.locator('#create-form button[type=submit]').click();
     await page.locator('#teacher-tabs [data-view="questions"]').click();
     await page.locator('.question-type').selectOption('multiple');
     await page.locator('.choice-options').fill('甲\n乙\n丙');

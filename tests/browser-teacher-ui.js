@@ -11,9 +11,9 @@ async (page) => {
     await page.locator('#source-sheets').click(); await page.locator('#sheet-url').fill('https://docs.google.com/spreadsheets/d/test/edit');
     check(await page.locator('#create-form').isHidden(),'two create forms visible'); await capture('import-desktop');
     await page.locator('#source-manual').click(); check(await page.locator('#activity-title').inputValue()==='光合作用・課堂練習','source switch lost title');
-    await page.locator('#question-count').fill('0'); await page.locator('#create-form button').click(); check(await page.locator('#question-count').evaluate(e=>!e.validity.valid),'invalid count accepted');
+    await page.locator('#question-count').fill('0'); await page.locator('#create-form button[type=submit]').click(); check(await page.locator('#question-count').evaluate(e=>!e.validity.valid),'invalid count accepted');
     await page.locator('#question-count').fill('3'); await page.setViewportSize({width:390,height:844}); await capture('dashboard-mobile');
-    await page.locator('#create-form button').click(); await page.locator('#settings-form').waitFor({state:'visible'});
+    await page.locator('#create-form button[type=submit]').click(); await page.locator('#settings-form').waitFor({state:'visible'});
     check(await page.evaluate(()=>current.questions.join(',')==='1,2,3'),'count numbering wrong');
     await page.setViewportSize({width:1280,height:900}); await page.locator('#quiz-mode').selectOption('sequential');
     await page.locator('#quiz-duration').fill('-1'); await page.locator('#start').click();
@@ -100,7 +100,7 @@ async (page) => {
     await page.setViewportSize({width:390,height:844}); await capture('tools-mobile'); await tab('results');
     check(await page.locator('#scoreboard-table').evaluate(e=>e.scrollWidth<=e.clientWidth),'mobile score column requires horizontal scroll'); await capture('results-mobile');
     stage='custom numbering'; await page.locator('#back').click(); await page.locator('#activity-title').fill('自訂題號驗收'); await page.locator('#custom-questions > summary').click();
-    await page.locator('#question-numbers').fill('A\nB'); await page.locator('#create-form button').click(); await page.locator('#settings-form').waitFor({state:'visible'});
+    await page.locator('#question-numbers').fill('A\nB'); await page.locator('#create-form button[type=submit]').click(); await page.locator('#settings-form').waitFor({state:'visible'});
     check(await page.evaluate(()=>current.questions.join(',')==='A,B'),'custom numbering wrong');
     stage='save and start without separate save';
     await page.locator('#quiz-duration').fill('60'); await tab('questions');

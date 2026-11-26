@@ -1,6 +1,6 @@
 "use strict";
 
-function confirmDeletion(title, message) {
+function confirmDeletion(title, message, confirmText="確認刪除") {
   const dialog = document.createElement('dialog');
   dialog.className = 'delete-dialog';
   dialog.setAttribute('aria-labelledby', 'delete-title');
@@ -10,6 +10,7 @@ function confirmDeletion(title, message) {
       <button class="secondary" value="cancel" autofocus>取消</button>
       <button class="danger" value="delete">確認刪除</button>
     </form>`;
+  dialog.querySelector('[value=delete]').textContent = confirmText;
   dialog.querySelector('h2').textContent = title;
   dialog.querySelector('p').textContent = message;
   document.body.append(dialog);

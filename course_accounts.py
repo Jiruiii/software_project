@@ -69,6 +69,8 @@ class Courses:
             if "enrollment" not in {col["name"] for col in self.db.execute("PRAGMA table_info(members)")}:
                 self.db.execute("ALTER TABLE members ADD COLUMN enrollment TEXT")
                 self.db.execute("UPDATE members SET enrollment=lower(hex(randomblob(16)))")
+            if "previous_verdict" not in {col["name"] for col in self.db.execute("PRAGMA table_info(grade_log)")}:
+                self.db.execute("ALTER TABLE grade_log ADD COLUMN previous_verdict TEXT")
         service.courses = self
 
     def one(self, sql, *args):
@@ -85,6 +87,8 @@ class Courses:
         )
         if not record:
             raise QuizError(401, "請從課程首頁重新進入。")
+        if record['kind'] == 'assistant' and self.role(record['uid'], record['course']) != 'assistant':
+            raise QuizError(403, '你目前沒有這門課的助教權限。')
         return record
 
     def student_workspace_session(self, token_hash):
@@ -171,6 +175,15 @@ class Courses:
                 self.db.execute("UPDATE people SET teacher=1 WHERE uid=?", (target,))
             else:
                 self.db.execute("INSERT OR IGNORE INTO assistants VALUES(?,?)", (course, target))
+        elif action == "remove-assistant":
+            if role != "owner":
+                raise QuizError(403, "只有授課老師可以移除助教。")
+            if data.get("confirmed") is not True:
+                raise QuizError(400, "請先確認移除本課助教。")
+            target = text(data.get("uid"), "助教 UID", 128)
+            self.db.execute("DELETE FROM assistants WHERE course=? AND uid=?", (course, target))
+            self.db.execute("""DELETE FROM sessions WHERE token_hash IN
+                (SELECT hash FROM course_sessions WHERE course=? AND uid=? AND kind='assistant')""", (course, target))
         elif action == "create-course":
             if not teacher:
                 raise QuizError(403, "請先由管理員指定教師資格。")
@@ -218,7 +231,9 @@ class Courses:
         elif action == "course":
             return self.course_history(course, role, team, data.get("staff") is True)
         elif action == "leaderboard":
-            if role != "owner" and (
+            if data.get("staff") is True and not role:
+                raise QuizError(403, "無此課程排行榜權限。")
+            if role not in ("owner", "assistant") and (
                 not team or teacher or admin or self.one("SELECT 1 FROM assistants WHERE uid=?", uid)
             ):
                 raise QuizError(403, "無此課程排行榜權限。")
@@ -377,5 +392,7 @@ class Courses:
         if not staff:
             result["membership"] = {"name": team["name"], "enrollment": team["enrollment"]}
         if staff and role == "owner":
+            result["assistants"] = self.rows("""SELECT p.uid,p.email FROM assistants a JOIN people p ON p.uid=a.uid
+                WHERE a.course=? ORDER BY p.email,p.uid""", course)
             result["teams"] = self.rows("SELECT id,name FROM teams WHERE course=? ORDER BY name", course)
         return result

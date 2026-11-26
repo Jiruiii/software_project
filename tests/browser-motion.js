@@ -22,7 +22,7 @@ async page => {
   await page.locator('#login-form button').click();
   await page.locator('#activity-title').fill('課堂動態驗收');
   await page.locator('#question-count').fill('1');
-  await page.locator('#create-form button').click();
+  await page.locator('#create-form button[type=submit]').click();
   const code=await page.locator('#session-code').innerText();
   const aid=await page.evaluate(()=>activityId);
   const student=await page.context().newPage();
@@ -172,7 +172,7 @@ async page => {
     await page.waitForFunction(()=>!!window.releaseGrade);
     await page.locator('#back').click();
     await page.locator('#activity-title').fill('下一場活動');
-    await page.locator('#create-form button').click();
+    await page.locator('#create-form button[type=submit]').click();
     await page.getByRole('heading',{name:'下一場活動',exact:true}).waitFor();
     await page.evaluate(async()=>{window.releaseGrade();await refresh();});
     check(!await receipt.count() && !await page.evaluate(()=>motionCounts['eraser-sweep']),'上一場回應影響新活動');

@@ -205,8 +205,9 @@ class CourseTests(unittest.TestCase):
         self.call("helper", "home")
         self.call("teacher", "assistant", course=self.other, uid="helper")
         self.member("helper")
+        self.assertEqual(self.call("mentor", "leaderboard", course=self.course), self.call("teacher", "leaderboard", course=self.course))
         for actor, course in (("student", self.other), ("outsider", self.course), ("admin", self.course),
-                              ("mentor", self.course), ("helper", self.course)):
+                              ("mentor", self.other), ("helper", self.course)):
             with self.subTest(actor=actor), self.assertRaises(QuizError) as error:
                 self.call(actor, "leaderboard", course=course, staff=False)
             self.assertEqual(error.exception.status, 403)
@@ -344,7 +345,8 @@ class CourseTests(unittest.TestCase):
         student = self.call("student", "student-room", course=self.course, aid=aid)["token"]
         self.s.transition(self.teacher, aid, "active")
         self.s.submit(student, aid, "1", "答案")
-        self.s.transition(self.teacher, aid, "results")
+        self.s.submit(student, aid, "2", "仍在作答")
+        self.s.close_question(self.teacher, aid, "1")
         self.s.logout(self.teacher)
         restored = QuizService(":memory:", "test")
         self.addCleanup(restored.close)
@@ -360,6 +362,10 @@ class CourseTests(unittest.TestCase):
         worker.watch(teacher, aid, retry=True)
         worker.run_once()
         self.assertEqual(from_google(fake.data)[0].value(4, 6), "答案（第一組）")
+        self.assertNotIn('仍在作答',str(fake.writes))
+        restored.transition(teacher,aid,'results')
+        worker.run_once()
+        self.assertIn('仍在作答（第一組）',str(fake.writes))
         answer = restored.snapshot(teacher, aid)["answers"][0]
         restored.review(teacher, aid, answer["id"], "incorrect", answer["review_revision"])
         worker.run_once()

@@ -9,6 +9,7 @@ python -m unittest discover -s tests -v
 在已安裝 `requirements-firebase.txt` 的 Python 環境執行。瀏覽器驗收使用隔離資料庫與測試身分。
 
 - 帳號工作區、課程加入、密碼重設、排行榜、聊天與代碼複製：`python tests/run_extra_ui.py --suite courses`。
+- 手動題組、預填、全題個別關題、助教改判、跨工作階段批次復原、回放倍速與撤權的 Chrome 流程：`python tests/run_extra_ui.py --suite classroom-operations`。對應的資料升級與衝突測試：`python -m unittest discover -s tests -p test_classroom_operations.py -v`。
 - 全題跨場保底：`python -m unittest discover -s tests -p test_cross_activity_priority.py -v`。教師選來源、重新載入設定及兩組學生在三秒前後的作答介面，可用 `python tests/run_extra_ui.py --suite cross-priority` 驗收。
 - 多選題、完整吻合判分及草稿恢復：`python tests/run_extra_ui.py --suite multiple`。
 - 題型、不押及本組即時分數驗收：`python tests/run_extra_ui.py --suite question-types`。
@@ -47,3 +48,5 @@ python tests/run_live_sheets.py
 2026-11-22 發布前重新執行完整單元測試，127 項通過；`courses` 瀏覽器流程使用離線身分通過。OpenSpec 嚴格驗證通過 8 份主規格與 1 個進行中的變更。
 
 歷史測試資料保存在 [驗收證據目錄](evidence/README.md)。近期排行榜、學生公用頻道、可複製代碼的測試結果記在各自的 [OpenSpec 歸檔](../openspec/changes/archive/)。Firebase 真實帳號驗收請見[帳號整合驗收紀錄](../openspec/changes/archive/2026-11-25-firebase-course-accounts/tasks.md)。
+
+2026-11-26 已驗收七項課堂操作。新增的 Chrome 流程以三組學生與兩門課串接備課、提交、部分關題、助教批改、跨工作階段復原、回放及撤權。完整 Python 測試共 153 項通過。使用隔離 SQLite、離線登入及 Sheets 替身。執行環境禁止連往 loopback，測試將 HTTP 請求送進相同的應用程式處理器；部署測試以本機 Git bundle 傳輸提交。未連線至正式站或修改實際試算表。

@@ -134,7 +134,7 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                     if target:
                         accounts.access(scope, target[1])
                     if scope['kind'] == 'assistant' and path != '/api/logout':
-                        if not target or not ((self.command == 'GET' and target[2] is None) or
+                        if not target or not ((self.command == 'GET' and target[2] in (None, 'review-history')) or
                                 (self.command == 'POST' and target[2] in ('review','review-batch','review-undo','clusters'))):
                             raise QuizError(403, "助教僅能查看本課程紀錄與批改。")
             if self.command == "POST" and path == "/api/teacher/login":
@@ -166,8 +166,8 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                 if self.command == "GET":
                     return self.respond(200, {"activities": service.activities(token)})
                 if self.command == "POST":
-                    return self.respond(201, service.create(token, data.get("title"), data.get("questions")))
-            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|delete|answers|export|sheet-sync|csv|settings|round|review|review-batch|review-undo|clusters|reference|report|bundle|question-settings|chat))?", path)
+                    return self.respond(201, service.create(token, data.get("title"), data.get("questions"), groups=data.get("groups")))
+            match = re.fullmatch(r"/api/activities/([a-f0-9]{24})(?:/(start|end|delete|answers|export|sheet-sync|csv|settings|round|close-question|review|review-history|review-batch|review-undo|clusters|reference|report|bundle|question-settings|chat))?", path)
             if match:
                 aid, action = match.groups()
                 if action == "chat":
@@ -197,6 +197,10 @@ def make_server(service, port=8000, sheets=None, portal=False, public_origin=Non
                 if self.command == "POST" and action == "settings":
                     return self.respond(200, service.configure(token, aid, data.get("mode"), data.get("fairness", False),
                                                                data.get("duration_seconds", 0), data.get("priority_source")))
+                if self.command == "POST" and action == "close-question":
+                    return self.managed(service.close_question(token, aid, data.get("question")), token, aid)
+                if self.command == "GET" and action == "review-history":
+                    return self.respond(200, service.review_history(token, aid))
                 if self.command == "POST" and action == "round":
                     return self.managed(service.round_action(token, aid, data.get("action")), token, aid)
                 if self.command == "GET" and action == "csv":

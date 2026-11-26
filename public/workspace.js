@@ -98,7 +98,7 @@
       image.src=person.photo; avatar.append(image);
     }
     menu.replaceChildren(make('span','profile-name',name));
-    const {staff,teacher,admin,courseId,courseTitle,owner}=permissions;
+    const {staff,assistant,teacher,admin,courseId,courseTitle,owner}=permissions;
     const primary=make('div','nav-primary');
     rail.replaceChildren(make('h2','rail-heading','工作區目錄'),primary);
     function group(id,title) {
@@ -140,8 +140,8 @@
     const records=staff?'學生作答與批改':'作答紀錄';
     const historyView=courseId?'history/'+courseId:'history';
     link(primary,historyView,records);
-    if(staff===false || teacher || owner) {
-      const current=courseId && (!staff || owner);
+    if(staff===false || teacher || owner || assistant) {
+      const current=courseId;
       link(primary,current?'leaderboard/'+courseId:'leaderboard','課程排行榜');
     }
     if(courseId) {
@@ -185,7 +185,7 @@
   }
   const staff=room?.role==='teacher', owner=staff && !room.assistant;
   render(room?.course ? room.profile || {name:'帳號'} : null,
-         {teacher:owner,...room?.navigation,staff,owner,courseId:room?.course});
+         {teacher:owner,...room?.navigation,staff,owner,assistant:room?.assistant,courseId:room?.course});
   if(room?.course) window.courseNav.select('course/'+room.course,'location');
   if(room?.course && staff) {
     const tabs=document.getElementById('teacher-tabs');

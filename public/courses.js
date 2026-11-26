@@ -134,7 +134,7 @@ function draw() {
   const owner=!!match && home.uid===match.owner;
   const selected=match && (view==='course/'+id || (owner && ['assistant','password','new-activity'].some(action=>view==='course/'+id+'/'+action))) ? match : null;
   window.courseNav.render(home ? profile() : null,{
-    staff,teacher:home?.teacher,admin:home?.admin,courseId:selected?.id,courseTitle:selected?.title,owner:!!selected && owner
+    staff,assistant:!!home?.teaching.length,teacher:home?.teacher,admin:home?.admin,courseId:selected?.id,courseTitle:selected?.title,owner:!!selected && owner
   },navigate);
   $('intro').textContent = staff ? '登入教學工作區' : '登入你的小組';
   $('hint').textContent = staff ? '建立自己的課程，或進入受邀協助批改的課程。' : '用自己的 Google 帳號加入或建立課程小組。';
@@ -154,9 +154,9 @@ function draw() {
     return;
   }
   if(page==='history') {window.courseNav.select('history'); historyView(id); return;}
-  if(page==='leaderboard' && (!staff || home.teacher)) {
+  if(page==='leaderboard' && (!staff || home.teacher || home.teaching.length)) {
     window.courseNav.select('leaderboard');
-    leaderboardView(staff ? courses.filter(c=>c.owner===home.uid) : courses,id);
+    leaderboardView(courses,id);
     return;
   }
   if(view==='admin' && home.admin) {
@@ -196,7 +196,7 @@ function draw() {
     button(actions,'建立小組',()=>navigate('create-team'));
   }
   button(actions,staff?'學生作答與批改':'作答紀錄',()=>navigate('history'));
-  if(!staff || home.teacher) button(actions,'課程排行榜',()=>navigate('leaderboard'));
+  if(!staff || home.teacher || home.teaching.length) button(actions,'課程排行榜',()=>navigate('leaderboard'));
   const {track}=gallery(list,staff?'授課與協作':'已加入的課程',courses.length+' 門');
   if(!courses.length) list.append(node('p',staff?'目前沒有授課或受邀的課程。':'目前尚未加入課程小組。','muted'));
   for(const c of courses) galleryCard(track,c.title,staff?(c.owner===home.uid?'授課教師':'助教'):c.name,
@@ -248,7 +248,7 @@ function leaderboardView(courses,preferred) {
   let previous;
   async function refresh() {
     try {
-      const {rows}=await api('leaderboard',{course});
+      const {rows}=await api('leaderboard',{course,staff});
       if(version!==pageVersion) return;
       const current=JSON.stringify(rows);
       if(current!==previous) {
@@ -316,7 +316,7 @@ function historyView(preferred) {
               entry.append(node('strong',(teaching?a.group_name+' · ':'')+'第 '+a.question_id+' 題'),
                            node('p',a.text),node('small',verdicts[a.verdict] || a.verdict));
               if(teaching && a.author) entry.append(node('small','送出者　'+a.author));
-              for(const r of a.reviews || []) entry.append(node('small',new Date(r.stamp*1000).toLocaleString('zh-TW')+' · '+r.email+' · '+(verdicts[r.verdict] || r.verdict)));
+              for(const r of a.reviews || []) entry.append(node('small',new Date(r.stamp*1000).toLocaleString('zh-TW')+' · '+r.email+' · '+(r.previous_verdict?(verdicts[r.previous_verdict] || r.previous_verdict)+' → ':'')+(verdicts[r.verdict] || r.verdict)));
               body.append(entry);
             }
           } catch(error) {delete item.dataset.loaded; body.textContent=error.message;}
@@ -359,7 +359,20 @@ async function course(c,task) {
   $('workspace').replaceChildren();
   $('title').textContent=c.title;
   if(task==='assistant' && data.role==='owner') {
-    form(panel('加入助教'),[['uid','助教的帳號 UID']],'加入助教',async d=>{await api('assistant',{...d,course:c.id});status('已加入本課程的助教。');});
+    form(panel('加入助教'),[['uid','助教的帳號 UID']],'加入助教',async d=>{await api('assistant',{...d,course:c.id});status('已加入本課程的助教。'); if(pageVersion===version) await course(c,task);});
+    const list=panel('目前助教');
+    if(!data.assistants.length) list.append(node('p','本課程尚未加入助教。','muted'));
+    for(const person of data.assistants) {
+      const row=node('div',undefined,'form-actions');
+      row.append(node('span',person.email+' · '+person.uid));
+      button(row,'移除助教',async()=>{
+        const confirmed=await confirmDeletion('移除「'+c.title+'」的助教？',person.email+'（'+person.uid+'）將失去本課程的批改與排行榜權限。','確認移除');
+        if(!confirmed || pageVersion!==version) return;
+        await api('remove-assistant',{course:c.id,uid:person.uid,confirmed:true});
+        if(pageVersion===version) {await course(c,task);status('已移除本課助教。');}
+      });
+      list.append(row);
+    }
     return;
   }
   if(task==='password' && data.role==='owner') {
@@ -380,7 +393,7 @@ async function course(c,task) {
   const actions=toolbar(details);
   if(data.role==='owner') button(actions,'建立搶答活動',()=>navigate('course/'+c.id+'/new-activity'),'primary');
   button(actions,staff?'學生作答與批改':'作答紀錄',()=>navigate('history/'+c.id));
-  if(!staff || data.role==='owner') button(actions,'課程排行榜',()=>navigate('leaderboard/'+c.id));
+  button(actions,'課程排行榜',()=>navigate('leaderboard/'+c.id));
   const summary=node('div',undefined,'course-summary');
   const total=node('strong',undefined,'team-total');
   if(!staff) {

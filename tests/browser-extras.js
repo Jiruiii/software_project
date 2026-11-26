@@ -14,7 +14,7 @@ async (page) => {
   stage='line 9';
   await page.locator('#question-count').fill('2');
   stage='line 10';
-  await page.locator('#create-form button').click();
+  await page.locator('#create-form button[type=submit]').click();
   stage='line 11';
   await page.locator('#settings-form').waitFor({state:'visible'});
   stage='line 12';
@@ -226,7 +226,7 @@ async (page) => {
   await student.locator('#report-table').screenshot({path:'output/playwright/student-verdicts.png'});
   stage='line 99';
   await page.locator('#back').click(); await page.locator('#activity-title').fill('倒數驗收');
-  await page.locator('#question-count').fill('1'); await page.locator('#create-form button').click();
+  await page.locator('#question-count').fill('1'); await page.locator('#create-form button[type=submit]').click();
   await page.locator('#session-title').filter({hasText:'倒數驗收'}).waitFor({state:'visible'});
   await page.locator('#quiz-duration').fill('2'); await page.locator('#save-settings').click();
   await page.locator('#notice').filter({hasText:'所有設定已儲存'}).waitFor();

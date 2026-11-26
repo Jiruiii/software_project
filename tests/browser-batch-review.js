@@ -8,7 +8,7 @@ async (page) => {
   await page.locator('#login-form button').click();
   await page.locator('#activity-title').fill('相似答案批次批改驗收');
   await page.locator('#question-count').fill('2');
-  await page.locator('#create-form button').click();
+  await page.locator('#create-form button[type=submit]').click();
   await page.locator('#settings-form').waitFor({state:'visible'});
   const session=await page.evaluate(()=>({auth:JSON.parse(sessionStorage.getItem('classroom.auth')),id:sessionStorage.getItem('classroom.activity')}));
   const path=`/api/activities/${session.id}`;
